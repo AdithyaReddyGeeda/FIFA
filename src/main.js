@@ -226,10 +226,58 @@ const tmpV3 = new THREE.Vector3();
 
 let goalPopupTimer = 0;
 let offsidePopupTimer = 0;
+let cardPopupTimer = 0;
 let uiTimerAccum = 0;
+
+/** Yellow cards per player; value 1 = one yellow — next yellow becomes red. */
+const yellowCards = new Map();
 
 /** @type {AudioContext | null} */
 let audioCtx = null;
+
+/** Filtered 4s noise buffer for stadium murmur (built in initAudio). */
+let crowdMurmurBuffer = null;
+/** @type {GainNode | null} */
+let crowdLoopGainNode = null;
+/** @type {AudioBufferSourceNode | null} */
+let crowdLoopSourceNode = null;
+/** @type {Promise<void> | null} */
+let crowdMurmurBuildPromise = null;
+
+let nearMissCooldown = 0;
+
+const crowdLoop = {
+  async start() {
+    initAudio();
+    if (!audioCtx) return;
+    await ensureCrowdMurmurBuilt();
+    if (!crowdMurmurBuffer || !crowdLoopGainNode) return;
+    if (crowdLoopSourceNode) return;
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume().catch(() => {});
+    }
+    const src = audioCtx.createBufferSource();
+    src.buffer = crowdMurmurBuffer;
+    src.loop = true;
+    src.connect(crowdLoopGainNode);
+    crowdLoopSourceNode = src;
+    src.start(audioCtx.currentTime);
+  },
+  stop() {
+    if (!crowdLoopSourceNode) return;
+    try {
+      crowdLoopSourceNode.stop();
+    } catch (_) {
+      /* already stopped */
+    }
+    try {
+      crowdLoopSourceNode.disconnect();
+    } catch (_) {
+      /* */
+    }
+    crowdLoopSourceNode = null;
+  },
+};
 
 // DOM
 let elLoadingScreen;
@@ -251,6 +299,8 @@ let elGoalTeamName;
 let elOffsidePopup;
 let elSetPiecePopup;
 let elSetPieceText;
+let elCardPopup;
+let elCardPopupNumber;
 let minimapCanvas;
 let minimapCtx;
 let elShotBar;
@@ -855,6 +905,82 @@ function showSetPieceBanner(text) {
   if (elSetPiecePopup) elSetPiecePopup.classList.add('show');
 }
 
+function showCardPopup(player, kind) {
+  if (!elCardPopup || !elCardPopupNumber || !player) return;
+  elCardPopup.classList.remove('card-yellow', 'card-red');
+  elCardPopup.classList.add(kind === 'red' ? 'card-red' : 'card-yellow');
+  elCardPopupNumber.textContent = String(player.slotIndex + 1);
+  elCardPopup.classList.add('show');
+  cardPopupTimer = 2.5;
+}
+
+function reassignControlledPlayerAfterSendoff(teamIndex) {
+  if (GAME_CONFIG.userTeamIndex !== teamIndex) return;
+  const mates = players.filter((p) => p.teamIndex === teamIndex);
+  if (mates.length === 0) {
+    controlledPlayer = null;
+    return;
+  }
+  const preferred =
+    mates.find((p) => p.role === 'fwd' && p.slotIndex === 9) ||
+    mates.find((p) => p.role === 'fwd') ||
+    mates[0];
+  controlledPlayer = preferred;
+  players.forEach((p) => {
+    p.isUserControlled = p === controlledPlayer;
+  });
+}
+
+function sendOffPlayer(p) {
+  if (!p || !p.mesh) return;
+  if (ballOwner === p) releaseBallFromOwner();
+  p.hasBall = false;
+  yellowCards.delete(p);
+  const team = p.teamIndex;
+  if (p.mesh.parent) p.mesh.parent.remove(p.mesh);
+  else if (scene) scene.remove(p.mesh);
+  const idx = players.indexOf(p);
+  if (idx >= 0) players.splice(idx, 1);
+  if (controlledPlayer === p) reassignControlledPlayerAfterSendoff(team);
+}
+
+function freekick(fouledPlayer) {
+  if (!gameBall || !fouledPlayer) return;
+  const r = GAME_CONFIG.ballRadius;
+  const halfW = PITCH_CONFIG.halfWidth;
+  const halfL = PITCH_CONFIG.halfLength;
+  const bx = THREE.MathUtils.clamp(
+    fouledPlayer.position.x,
+    -halfW + r,
+    halfW - r
+  );
+  const bz = THREE.MathUtils.clamp(
+    fouledPlayer.position.z,
+    -halfL + r,
+    halfL - r
+  );
+  const team = fouledPlayer.teamIndex;
+  const taker =
+    nearestPlayerForSetPiece(team, bx, bz, false) ||
+    players.find((pl) => pl.teamIndex === team);
+  if (!taker) return;
+  giveBallToPlayerAt(taker, bx, r, bz);
+  lastTouchTeam = team;
+  showSetPieceBanner('FREE KICK');
+}
+
+function applyTackleFoul(tackler, fouled) {
+  const prev = yellowCards.get(tackler) || 0;
+  if (prev >= 1) {
+    showCardPopup(tackler, 'red');
+    sendOffPlayer(tackler);
+  } else {
+    yellowCards.set(tackler, 1);
+    showCardPopup(tackler, 'yellow');
+  }
+  freekick(fouled);
+}
+
 function giveBallToPlayerAt(p, wx, wy, wz) {
   if (!p || !gameBall) return;
   for (const pl of players) {
@@ -1098,19 +1224,64 @@ function checkBallControl() {
 // WEB AUDIO (lightweight, no external libs)
 // =============================================================================
 
+async function ensureCrowdMurmurBuilt() {
+  if (crowdMurmurBuffer && crowdLoopGainNode) return;
+  if (!audioCtx) return;
+  if (crowdMurmurBuildPromise) return crowdMurmurBuildPromise;
+
+  const build = (async () => {
+    const ac = audioCtx;
+    if (!ac) return;
+    const dur = 4;
+    const sr = ac.sampleRate;
+    const frameCount = Math.floor(sr * dur);
+    const offline = new OfflineAudioContext(1, frameCount, sr);
+    const noiseBuffer = offline.createBuffer(1, frameCount, sr);
+    const ch = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < frameCount; i += 1) {
+      ch[i] = Math.random() * 2 - 1;
+    }
+    const src = offline.createBufferSource();
+    src.buffer = noiseBuffer;
+    const filter = offline.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 400;
+    filter.Q.value = 0.5;
+    src.connect(filter);
+    filter.connect(offline.destination);
+    src.start(0);
+    const rendered = await offline.startRendering();
+    if (!audioCtx) return;
+    crowdMurmurBuffer = rendered;
+    if (!crowdLoopGainNode) {
+      crowdLoopGainNode = audioCtx.createGain();
+      crowdLoopGainNode.gain.value = 0.04;
+      crowdLoopGainNode.connect(audioCtx.destination);
+    }
+  })();
+
+  crowdMurmurBuildPromise = build;
+  build.catch(() => {
+    crowdMurmurBuildPromise = null;
+  });
+
+  return build;
+}
+
 function initAudio() {
   if (audioCtx) return;
   try {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     audioCtx = new AC();
+    void ensureCrowdMurmurBuilt();
   } catch {
     audioCtx = null;
   }
 }
 
 /**
- * @param {'kick' | 'whistle' | 'crowd_cheer'} type
+ * @param {'kick' | 'whistle' | 'crowd_cheer' | 'near_miss'} type
  */
 function playSound(type) {
   initAudio();
@@ -1171,6 +1342,31 @@ function playSound(type) {
     g.gain.exponentialRampToValueAtTime(0.14, t0 + 0.06);
     g.gain.exponentialRampToValueAtTime(0.1, t0 + 0.45);
     g.gain.exponentialRampToValueAtTime(eps, t0 + dur);
+    src.connect(filter);
+    filter.connect(g);
+    g.connect(audioCtx.destination);
+    src.start(t0);
+    src.stop(t0 + dur + 0.02);
+    return;
+  }
+
+  if (type === 'near_miss') {
+    const dur = 0.4;
+    const n = Math.max(1, Math.floor(audioCtx.sampleRate * dur));
+    const buffer = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
+    const ch = buffer.getChannelData(0);
+    for (let i = 0; i < n; i += 1) {
+      ch[i] = Math.random() * 2 - 1;
+    }
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(800, t0);
+    filter.Q.setValueAtTime(0.5, t0);
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.09, t0);
+    g.gain.linearRampToValueAtTime(0.0001, t0 + dur);
     src.connect(filter);
     filter.connect(g);
     g.connect(audioCtx.destination);
@@ -1345,6 +1541,9 @@ function performTackle(player) {
   }
   if (!best || !gameBall) return;
 
+  const hadBallBefore = best.hasBall;
+  const tackleDistance = bestD;
+
   const push = tmpV2.subVectors(gameBall.position, best.position);
   push.y = 0;
   if (push.lengthSq() < 1e-4) push.set(0, 0, 1);
@@ -1354,6 +1553,15 @@ function performTackle(player) {
   best.hasBall = false;
   ballVelocity.copy(push);
   ballVelocity.y = 2;
+
+  if (
+    hadBallBefore &&
+    tackleDistance < PLAYER_CONFIG.tackleRadius * 0.5 &&
+    tackleDistance < 1.2 &&
+    Math.random() < 0.4
+  ) {
+    applyTackleFoul(player, best);
+  }
 }
 
 function switchToClosestPlayer() {
@@ -1387,6 +1595,104 @@ function showGoal(teamName) {
   if (elGoalPopup && elGoalTeamName) {
     elGoalTeamName.textContent = teamName;
     elGoalPopup.classList.add('show');
+  }
+}
+
+function ballInHomeGoalScoringVolume(p) {
+  const gw = GAME_CONFIG.goalWidth * 0.5;
+  const gh = GAME_CONFIG.goalHeight;
+  const r = GAME_CONFIG.ballRadius;
+  return (
+    p.z + r < GAME_CONFIG.goalLineZHome &&
+    p.z + r > GAME_CONFIG.goalLineZHome - 2 &&
+    Math.abs(p.x) <= gw &&
+    p.y < gh + r
+  );
+}
+
+function ballInAwayGoalScoringVolume(p) {
+  const gw = GAME_CONFIG.goalWidth * 0.5;
+  const gh = GAME_CONFIG.goalHeight;
+  const r = GAME_CONFIG.ballRadius;
+  return (
+    p.z - r > GAME_CONFIG.goalLineZAway &&
+    p.z - r < GAME_CONFIG.goalLineZAway + 2 &&
+    Math.abs(p.x) <= gw &&
+    p.y < gh + r
+  );
+}
+
+function distPointToSegment3D(px, py, pz, ax, ay, az, bx, by, bz) {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const abz = bz - az;
+  const apx = px - ax;
+  const apy = py - ay;
+  const apz = pz - az;
+  const abLen2 = abx * abx + aby * aby + abz * abz;
+  const t =
+    abLen2 < 1e-10
+      ? 0
+      : THREE.MathUtils.clamp(
+          (apx * abx + apy * aby + apz * abz) / abLen2,
+          0,
+          1
+        );
+  const qx = ax + t * abx;
+  const qy = ay + t * aby;
+  const qz = az + t * abz;
+  return Math.hypot(px - qx, py - qy, pz - qz);
+}
+
+function minDistBallToHomeGoalFrame(p) {
+  const gw = GAME_CONFIG.goalWidth * 0.5;
+  const gh = GAME_CONFIG.goalHeight;
+  const z = GAME_CONFIG.goalLineZHome;
+  const d1 = distPointToSegment3D(p.x, p.y, p.z, -gw, 0, z, -gw, gh, z);
+  const d2 = distPointToSegment3D(p.x, p.y, p.z, gw, 0, z, gw, gh, z);
+  const d3 = distPointToSegment3D(p.x, p.y, p.z, -gw, gh, z, gw, gh, z);
+  return Math.min(d1, d2, d3);
+}
+
+function minDistBallToAwayGoalFrame(p) {
+  const gw = GAME_CONFIG.goalWidth * 0.5;
+  const gh = GAME_CONFIG.goalHeight;
+  const z = GAME_CONFIG.goalLineZAway;
+  const d1 = distPointToSegment3D(p.x, p.y, p.z, -gw, 0, z, -gw, gh, z);
+  const d2 = distPointToSegment3D(p.x, p.y, p.z, gw, 0, z, gw, gh, z);
+  const d3 = distPointToSegment3D(p.x, p.y, p.z, -gw, gh, z, gw, gh, z);
+  return Math.min(d1, d2, d3);
+}
+
+function checkNearMissShots(deltaTime) {
+  if (nearMissCooldown > 0) {
+    nearMissCooldown -= deltaTime;
+    return;
+  }
+  if (!gameBall || ballOwner) return;
+  if (ballVelocity.lengthSq() < 16) return;
+  const p = gameBall.position;
+  const r = GAME_CONFIG.ballRadius;
+  const threshold = 0.5 + r;
+
+  if (Math.abs(p.z - GAME_CONFIG.goalLineZHome) < 8) {
+    if (
+      minDistBallToHomeGoalFrame(p) < threshold &&
+      !ballInHomeGoalScoringVolume(p)
+    ) {
+      playSound('near_miss');
+      nearMissCooldown = 0.85;
+      return;
+    }
+  }
+  if (Math.abs(p.z - GAME_CONFIG.goalLineZAway) < 8) {
+    if (
+      minDistBallToAwayGoalFrame(p) < threshold &&
+      !ballInAwayGoalScoringVolume(p)
+    ) {
+      playSound('near_miss');
+      nearMissCooldown = 0.85;
+    }
   }
 }
 
@@ -1722,6 +2028,7 @@ function setState(next) {
   }
 
   if (next === GAME_STATE.MENU) {
+    crowdLoop.stop();
     cameraMode = 'BROADCAST';
     if (cameraPersp) camera = cameraPersp;
     if (elMainMenu) elMainMenu.classList.remove('show-custom');
@@ -1767,6 +2074,7 @@ function startMatch() {
   playSound('whistle');
   cameraMode = 'BROADCAST';
   if (cameraPersp) camera = cameraPersp;
+  yellowCards.clear();
   resetMatchStats();
   homeScore = 0;
   awayScore = 0;
@@ -1778,6 +2086,7 @@ function startMatch() {
   resetPlayersToFormation();
   setupTeams();
   setState(GAME_STATE.PLAYING);
+  void crowdLoop.start();
 }
 
 // =============================================================================
@@ -1936,6 +2245,28 @@ function updateFulltimeStatsPanel() {
 }
 
 function updateUI(deltaTime) {
+  if (
+    gameState === GAME_STATE.PLAYING &&
+    audioCtx &&
+    crowdLoopGainNode &&
+    gameBall
+  ) {
+    const halfL = PITCH_CONFIG.halfLength;
+    const third = halfL * 0.6;
+    const bz = Math.abs(gameBall.position.z);
+    let target = 0.04;
+    if (bz > third) {
+      const span = halfL - third;
+      const t = span > 1e-6 ? Math.min(1, (bz - third) / span) : 1;
+      target = 0.04 + t * (0.12 - 0.04);
+    }
+    const now = audioCtx.currentTime;
+    const rampEnd = now + 0.05;
+    crowdLoopGainNode.gain.cancelScheduledValues(now);
+    crowdLoopGainNode.gain.setValueAtTime(crowdLoopGainNode.gain.value, now);
+    crowdLoopGainNode.gain.linearRampToValueAtTime(target, rampEnd);
+  }
+
   if (elScoreboard) {
     elScoreboard.textContent = `${TEAMS.home.name} ${homeScore} - ${awayScore} ${TEAMS.away.name}`;
   }
@@ -1968,6 +2299,13 @@ function updateUI(deltaTime) {
     offsidePopupTimer -= deltaTime;
     if (offsidePopupTimer <= 0 && elOffsidePopup) {
       elOffsidePopup.classList.remove('show');
+    }
+  }
+
+  if (cardPopupTimer > 0) {
+    cardPopupTimer -= deltaTime;
+    if (cardPopupTimer <= 0 && elCardPopup) {
+      elCardPopup.classList.remove('show');
     }
   }
 
@@ -2133,6 +2471,8 @@ function cacheDom() {
   elOffsidePopup = document.getElementById('offside-popup');
   elSetPiecePopup = document.getElementById('set-piece-popup');
   elSetPieceText = document.getElementById('set-piece-text');
+  elCardPopup = document.getElementById('card-popup');
+  elCardPopupNumber = document.getElementById('card-popup-number');
   minimapCanvas = document.getElementById('minimap-canvas');
   minimapCtx = minimapCanvas?.getContext('2d') || null;
   elShotBar = document.getElementById('shot-bar');
@@ -2209,6 +2549,7 @@ function animate() {
     updateBallPhysics(deltaTime);
     checkBallControl();
     checkGoals();
+    checkNearMissShots(deltaTime);
     updateAI(deltaTime);
     updateAllPlayers(deltaTime);
     updateMatchTime(deltaTime);
