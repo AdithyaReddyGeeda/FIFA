@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FIFA Soccer Game</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0a1628;
+    }
+    #game-canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+    }
+
+    /* Loading */
+    #loading-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #0d2137 0%, #1a3a5c 50%, #0a1628 100%);
+      color: #fff;
+    }
+    #loading-screen.hidden { display: none; }
+    #loading-screen h1 {
+      font-size: clamp(1.8rem, 5vw, 3rem);
+      letter-spacing: 0.15em;
+      margin-bottom: 0.5rem;
+      text-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    }
+    #loading-screen .sub { opacity: 0.85; margin-bottom: 2rem; font-size: 0.95rem; }
+    .progress-wrap {
+      width: min(360px, 85vw);
+      height: 10px;
+      background: rgba(255,255,255,0.12);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    #loading-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #e8c547, #4ade80);
+      border-radius: 6px;
+      transition: width 0.15s ease-out;
+    }
+    #loading-text { margin-top: 1rem; font-size: 0.9rem; opacity: 0.8; }
+
+    /* Main menu */
+    #main-menu {
+      position: fixed;
+      inset: 0;
+      z-index: 90;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(160deg, #1e3a5f 0%, #0f2840 40%, #061018 100%);
+      color: #fff;
+    }
+    #main-menu.visible { display: flex; }
+    #main-menu h1 {
+      font-size: clamp(2rem, 6vw, 3.5rem);
+      margin-bottom: 0.35rem;
+      text-shadow: 0 2px 24px rgba(0,0,0,0.35);
+    }
+    #main-menu .subtitle { opacity: 0.75; margin-bottom: 2.5rem; font-size: 1.05rem; }
+    .menu-btn {
+      min-width: 220px;
+      padding: 14px 28px;
+      margin: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      color: #0a1628;
+      background: linear-gradient(180deg, #f8fafc, #e2e8f0);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+      transition: transform 0.12s, box-shadow 0.12s;
+    }
+    .menu-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.3);
+    }
+    .menu-btn.primary {
+      background: linear-gradient(180deg, #4ade80, #22c55e);
+      color: #052e16;
+    }
+
+    /* Pause */
+    #pause-menu {
+      position: fixed;
+      inset: 0;
+      z-index: 85;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.9);
+      color: #fff;
+    }
+    #pause-menu.visible { display: flex; }
+    .pause-panel {
+      text-align: center;
+      padding: 2rem 3rem;
+      border-radius: 16px;
+      background: rgba(30,50,80,0.85);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .pause-panel h2 { font-size: 2rem; margin-bottom: 1.5rem; letter-spacing: 0.2em; }
+
+    /* Halftime */
+    #halftime-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 88;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10, 22, 40, 0.92);
+      color: #fff;
+    }
+    #halftime-screen.visible { display: flex; }
+    #halftime-screen h2 { font-size: 2.2rem; letter-spacing: 0.25em; margin-bottom: 1rem; }
+    #halftime-score { font-size: 2.5rem; font-weight: 700; margin: 1rem 0; }
+    #halftime-screen .hint { opacity: 0.8; margin-bottom: 1.5rem; }
+
+    /* Fulltime */
+    #fulltime-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 88;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(6, 12, 24, 0.95);
+      color: #fff;
+    }
+    #fulltime-screen.visible { display: flex; }
+    #fulltime-screen h2 { font-size: 2.2rem; letter-spacing: 0.2em; margin-bottom: 0.5rem; }
+    #fulltime-score { font-size: 2.8rem; margin: 1rem 0; }
+    #fulltime-result { font-size: 1.5rem; color: #4ade80; margin-bottom: 1.5rem; }
+
+    /* HUD */
+    #hud {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      pointer-events: none;
+      display: none;
+    }
+    #hud.visible { display: block; }
+
+    #scoreboard {
+      position: absolute;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 28px;
+      background: rgba(0,0,0,0.65);
+      border-radius: 10px;
+      color: #fff;
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      border: 1px solid rgba(255,255,255,0.12);
+    }
+
+    #match-timer {
+      position: absolute;
+      top: 16px;
+      right: 20px;
+      padding: 8px 16px;
+      background: rgba(0,0,0,0.55);
+      border-radius: 8px;
+      color: #f8fafc;
+      font-size: 1.15rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #stamina-wrap {
+      position: absolute;
+      bottom: 24px;
+      right: 20px;
+      width: 180px;
+    }
+    #stamina-wrap label {
+      display: block;
+      color: #e2e8f0;
+      font-size: 0.75rem;
+      margin-bottom: 4px;
+      text-shadow: 0 1px 2px #000;
+    }
+    .stamina-bar-bg {
+      height: 14px;
+      border-radius: 7px;
+      background: rgba(0,0,0,0.5);
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    #stamina-fill {
+      height: 100%;
+      width: 100%;
+      border-radius: 7px;
+      background: linear-gradient(90deg, #166534, #4ade80, #86efac);
+      transform-origin: left center;
+      transform: scaleX(1);
+    }
+
+    #radar-wrap {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      width: 150px;
+      height: 150px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.35);
+      background: rgba(0,20,40,0.55);
+      overflow: hidden;
+      box-shadow: inset 0 0 20px rgba(0,0,0,0.4);
+    }
+    #minimap-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    #controls-hint {
+      position: absolute;
+      bottom: 20px;
+      left: 16px;
+      max-width: 280px;
+      padding: 10px 12px;
+      background: rgba(0,0,0,0.55);
+      border-radius: 8px;
+      color: #cbd5e1;
+      font-size: 0.72rem;
+      line-height: 1.45;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    #controls-hint strong { color: #fff; }
+
+    #goal-popup {
+      position: absolute;
+      top: 42%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0);
+      padding: 24px 48px;
+      background: linear-gradient(180deg, rgba(220,38,38,0.95), rgba(153,27,27,0.98));
+      border-radius: 16px;
+      color: #fff;
+      text-align: center;
+      pointer-events: none;
+      opacity: 0;
+      transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1), opacity 0.25s;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+      z-index: 20;
+    }
+    #goal-popup.show {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+    }
+    #goal-popup .goal-title { font-size: 2.2rem; font-weight: 800; letter-spacing: 0.15em; }
+    #goal-popup .goal-team { font-size: 1.25rem; margin-top: 8px; opacity: 0.95; }
+  </style>
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+
+  <div id="loading-screen">
+    <h1>FIFA SOCCER GAME</h1>
+    <p class="sub">Three.js · Vite · 11v11</p>
+    <div class="progress-wrap"><div id="loading-bar"></div></div>
+    <p id="loading-text">Loading assets…</p>
+  </div>
+
+  <div id="main-menu">
+    <h1>FIFA SOCCER GAME</h1>
+    <p class="subtitle">Barcelona vs Real Madrid · 4-3-3</p>
+    <button type="button" class="menu-btn primary" id="btn-quick-match">Quick Match</button>
+    <button type="button" class="menu-btn" id="btn-custom-match">Custom Match</button>
+  </div>
+
+  <div id="pause-menu">
+    <div class="pause-panel">
+      <h2>PAUSED</h2>
+      <button type="button" class="menu-btn" id="btn-resume">Resume (ESC)</button>
+      <button type="button" class="menu-btn" id="btn-pause-main">Main Menu</button>
+    </div>
+  </div>
+
+  <div id="halftime-screen">
+    <h2>HALF TIME</h2>
+    <div id="halftime-score">0 - 0</div>
+    <p class="hint">Sides switching…</p>
+    <button type="button" class="menu-btn primary" id="btn-continue-half">Continue (SPACE)</button>
+  </div>
+
+  <div id="fulltime-screen">
+    <h2>FULL TIME</h2>
+    <div id="fulltime-score">0 - 0</div>
+    <div id="fulltime-result">DRAW</div>
+    <button type="button" class="menu-btn primary" id="btn-play-again">Play Again</button>
+  </div>
+
+  <div id="hud">
+    <div id="scoreboard">HOME - AWAY</div>
+    <div id="match-timer">00:00</div>
+    <div id="stamina-wrap">
+      <label>Stamina</label>
+      <div class="stamina-bar-bg"><div id="stamina-fill"></div></div>
+    </div>
+    <div id="radar-wrap"><canvas id="minimap-canvas" width="150" height="150"></canvas></div>
+    <div id="controls-hint">
+      <strong>Controls</strong><br />
+      W A S D — Move · SHIFT — Sprint<br />
+      SPACE — Pass / Switch player<br />
+      E — Shoot / Tackle · Q — Through ball<br />
+      ESC — Pause
+    </div>
+    <div id="goal-popup">
+      <div class="goal-title">GOAL!</div>
+      <div class="goal-team" id="goal-team-name">Team</div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
