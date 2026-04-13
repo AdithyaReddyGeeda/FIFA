@@ -139,20 +139,63 @@ const TEAMS = {
   },
 };
 
-/** 4-3-3 local offsets from team anchor (x, z). Team 0 defends negative Z first half. */
-const FORMATION_SLOTS = [
-  { role: 'gk', offset: new THREE.Vector2(0, -46) },
-  { role: 'def', offset: new THREE.Vector2(-20, -34) },
-  { role: 'def', offset: new THREE.Vector2(-7, -36) },
-  { role: 'def', offset: new THREE.Vector2(7, -36) },
-  { role: 'def', offset: new THREE.Vector2(20, -34) },
-  { role: 'mid', offset: new THREE.Vector2(-14, -22) },
-  { role: 'mid', offset: new THREE.Vector2(0, -24) },
-  { role: 'mid', offset: new THREE.Vector2(14, -22) },
-  { role: 'fwd', offset: new THREE.Vector2(-10, -10) },
-  { role: 'fwd', offset: new THREE.Vector2(0, -8) },
-  { role: 'fwd', offset: new THREE.Vector2(10, -10) },
-];
+/**
+ * Outfield slots 1–10: normalized x,z in roughly [-1,1]; world =
+ * x * halfWidth*0.85, z * halfLength*0.8, then team / half flips on Z only.
+ * Team 0 defends negative Z first half; `role` drives AI lanes.
+ */
+const FORMATION_GK_NORM = { x: 0, z: -1.1 };
+
+const FORMATIONS = {
+  '4-3-3': [
+    { x: -0.69, z: -0.81, role: 'def' },
+    { x: -0.24, z: -0.86, role: 'def' },
+    { x: 0.24, z: -0.86, role: 'def' },
+    { x: 0.69, z: -0.81, role: 'def' },
+    { x: -0.48, z: -0.52, role: 'mid' },
+    { x: 0, z: -0.57, role: 'mid' },
+    { x: 0.48, z: -0.52, role: 'mid' },
+    { x: -0.35, z: -0.24, role: 'fwd' },
+    { x: 0, z: -0.19, role: 'fwd' },
+    { x: 0.35, z: -0.24, role: 'fwd' },
+  ],
+  '4-4-2': [
+    { x: -0.7, z: -0.82, role: 'def' },
+    { x: -0.24, z: -0.86, role: 'def' },
+    { x: 0.24, z: -0.86, role: 'def' },
+    { x: 0.7, z: -0.82, role: 'def' },
+    { x: -0.65, z: -0.5, role: 'mid' },
+    { x: -0.22, z: -0.52, role: 'mid' },
+    { x: 0.22, z: -0.52, role: 'mid' },
+    { x: 0.65, z: -0.5, role: 'mid' },
+    { x: -0.32, z: -0.2, role: 'fwd' },
+    { x: 0.32, z: -0.2, role: 'fwd' },
+  ],
+  '3-5-2': [
+    { x: -0.52, z: -0.88, role: 'def' },
+    { x: 0, z: -0.9, role: 'def' },
+    { x: 0.52, z: -0.88, role: 'def' },
+    { x: -0.88, z: -0.55, role: 'mid' },
+    { x: -0.26, z: -0.48, role: 'mid' },
+    { x: 0, z: -0.42, role: 'mid' },
+    { x: 0.26, z: -0.48, role: 'mid' },
+    { x: 0.88, z: -0.55, role: 'mid' },
+    { x: -0.3, z: -0.18, role: 'fwd' },
+    { x: 0.3, z: -0.18, role: 'fwd' },
+  ],
+  '5-3-2': [
+    { x: -0.82, z: -0.9, role: 'def' },
+    { x: -0.42, z: -0.88, role: 'def' },
+    { x: 0, z: -0.9, role: 'def' },
+    { x: 0.42, z: -0.88, role: 'def' },
+    { x: 0.82, z: -0.9, role: 'def' },
+    { x: -0.35, z: -0.5, role: 'mid' },
+    { x: 0, z: -0.48, role: 'mid' },
+    { x: 0.35, z: -0.5, role: 'mid' },
+    { x: -0.3, z: -0.22, role: 'fwd' },
+    { x: 0.3, z: -0.22, role: 'fwd' },
+  ],
+};
 
 const GAME_STATE = {
   LOADING: 'LOADING',
@@ -191,6 +234,11 @@ let players = [];
 let controlledPlayer = null;
 let selectionRing = null;
 let selectionRingMat = null;
+/** Name tag sprite for user-controlled player only. */
+let controlledLabel = null;
+let controlledLabelTexture = null;
+/** @type {HTMLCanvasElement | null} */
+let controlledLabelCanvas = null;
 
 let homeScore = 0;
 let awayScore = 0;
@@ -207,10 +255,18 @@ let currentHalf = 1;
 /** After halftime, teams swap ends: flip Z of formation for everyone. */
 let sidesSwapped = false;
 
+/** Key of FORMATIONS — same for both teams unless extended later. */
+let activeFormation = '4-3-3';
+
 const keys = {};
 let keySpacePressed = false;
 let keyEPressed = false;
 let keyQPressed = false;
+/** Virtual joystick direction (screen: +x right, +y down) mapped to world X/Z in getMovementVector */
+const touchMoveDir = new THREE.Vector2(0, 0);
+let joystickActiveTouchId = null;
+/** True while mobile Shoot (B) held for charged shot */
+let touchShootHeld = false;
 /** User shot charge 0–1 while holding E with the ball */
 let shotChargePct = 0;
 let shotCharging = false;
@@ -223,6 +279,8 @@ const cameraLookTarget = new THREE.Vector3();
 const tmpV1 = new THREE.Vector3();
 const tmpV2 = new THREE.Vector3();
 const tmpV3 = new THREE.Vector3();
+const tmpLabelQuat = new THREE.Quaternion();
+const tmpParentQuat = new THREE.Quaternion();
 
 let goalPopupTimer = 0;
 let offsidePopupTimer = 0;
@@ -832,13 +890,34 @@ function resetTeamsToDefault() {
   applyTeamPreset('away', 'realmadrid');
 }
 
+function getFormationSlotRole(slot) {
+  if (slot === 0) return 'gk';
+  const line = FORMATIONS[activeFormation];
+  const entry = line?.[slot - 1];
+  return entry?.role || 'mid';
+}
+
 function computeFormationWorld(teamIndex, slot) {
-  const slotData = FORMATION_SLOTS[slot];
-  if (!slotData) return new THREE.Vector3();
-  let z = slotData.offset.z;
-  if (teamIndex === 1) z = -z;
-  if (sidesSwapped) z = -z;
-  return new THREE.Vector3(slotData.offset.x, 0, z);
+  const sx = PITCH_CONFIG.halfWidth * 0.85;
+  const sz = PITCH_CONFIG.halfLength * 0.8;
+
+  if (slot === 0) {
+    let worldZ = FORMATION_GK_NORM.z * sz;
+    const worldX = FORMATION_GK_NORM.x * sx;
+    if (teamIndex === 1) worldZ = -worldZ;
+    if (sidesSwapped) worldZ = -worldZ;
+    return new THREE.Vector3(worldX, 0, worldZ);
+  }
+
+  const line = FORMATIONS[activeFormation];
+  const entry = line?.[slot - 1];
+  if (!entry) return new THREE.Vector3();
+
+  let worldZ = entry.z * sz;
+  let worldX = entry.x * sx;
+  if (teamIndex === 1) worldZ = -worldZ;
+  if (sidesSwapped) worldZ = -worldZ;
+  return new THREE.Vector3(worldX, 0, worldZ);
 }
 
 function setupTeams() {
@@ -849,7 +928,7 @@ function setupTeams() {
 
   for (let t = 0; t < 2; t++) {
     for (let s = 0; s < 11; s++) {
-      const role = FORMATION_SLOTS[s].role;
+      const role = getFormationSlotRole(s);
       const p = new Player(t, s, role);
       const fw = computeFormationWorld(t, s);
       p.formationWorld.copy(fw);
@@ -867,6 +946,7 @@ function setupTeams() {
   });
 
   players.forEach((p) => p.applyKitColors());
+  attachControlledLabelToPlayer(controlledPlayer);
 }
 
 function resetPlayersToFormation() {
@@ -919,6 +999,7 @@ function reassignControlledPlayerAfterSendoff(teamIndex) {
   const mates = players.filter((p) => p.teamIndex === teamIndex);
   if (mates.length === 0) {
     controlledPlayer = null;
+    if (controlledLabel?.parent) controlledLabel.parent.remove(controlledLabel);
     return;
   }
   const preferred =
@@ -929,10 +1010,14 @@ function reassignControlledPlayerAfterSendoff(teamIndex) {
   players.forEach((p) => {
     p.isUserControlled = p === controlledPlayer;
   });
+  attachControlledLabelToPlayer(controlledPlayer);
 }
 
 function sendOffPlayer(p) {
   if (!p || !p.mesh) return;
+  if (controlledLabel && controlledLabel.parent === p.mesh) {
+    controlledLabel.parent.remove(controlledLabel);
+  }
   if (ballOwner === p) releaseBallFromOwner();
   p.hasBall = false;
   yellowCards.delete(p);
@@ -1582,6 +1667,7 @@ function switchToClosestPlayer() {
     p.isUserControlled = p === best;
   });
   controlledPlayer = best;
+  attachControlledLabelToPlayer(best);
 }
 
 // =============================================================================
@@ -1730,6 +1816,11 @@ function resetAfterGoal() {
 // =============================================================================
 
 function getMovementVector() {
+  if (touchMoveDir.length() > 0.1) {
+    tmpV1.set(touchMoveDir.x, 0, touchMoveDir.y);
+    if (tmpV1.lengthSq() > 1) tmpV1.normalize();
+    return tmpV1;
+  }
   let x = 0;
   let z = 0;
   if (keys.KeyW || keys.w) z -= 1;
@@ -1754,7 +1845,7 @@ function updatePlayerMovement(deltaTime) {
 
   if (
     shotCharging &&
-    keys.KeyE &&
+    (keys.KeyE || touchShootHeld) &&
     controlledPlayer.hasBall &&
     ballOwner === controlledPlayer
   ) {
@@ -2083,8 +2174,8 @@ function startMatch() {
   sidesSwapped = false;
   shotCharging = false;
   shotChargePct = 0;
-  resetPlayersToFormation();
   setupTeams();
+  resetPlayersToFormation();
   setState(GAME_STATE.PLAYING);
   void crowdLoop.start();
 }
@@ -2127,6 +2218,13 @@ function updateTacticalOrthoFrustum() {
   cameraOrtho.updateProjectionMatrix();
 }
 
+function updateControlledLabelBillboard() {
+  if (!controlledLabel || !controlledLabel.parent || !camera) return;
+  controlledLabel.parent.getWorldQuaternion(tmpParentQuat);
+  tmpLabelQuat.copy(tmpParentQuat).invert().multiply(camera.quaternion);
+  controlledLabel.quaternion.copy(tmpLabelQuat);
+}
+
 function updateCamera(deltaTime) {
   if (!camera) return;
 
@@ -2135,6 +2233,7 @@ function updateCamera(deltaTime) {
     camera.position.set(0, 90, 0);
     camera.up.set(0, 0, -1);
     camera.lookAt(0, 0, 0);
+    updateControlledLabelBillboard();
     return;
   }
 
@@ -2170,6 +2269,7 @@ function updateCamera(deltaTime) {
     camera.position.lerp(cameraTargetPos, lerp);
     cameraLookTarget.copy(focal).add(new THREE.Vector3(0, 1.2, 0));
     camera.lookAt(cameraLookTarget);
+    updateControlledLabelBillboard();
     return;
   }
 
@@ -2186,12 +2286,81 @@ function updateCamera(deltaTime) {
     camera.position.lerp(cameraTargetPos, lerp);
     cameraLookTarget.copy(p).add(new THREE.Vector3(0, 1.2, 0));
     camera.lookAt(cameraLookTarget);
+    updateControlledLabelBillboard();
   }
 }
 
 // =============================================================================
-// SELECTION INDICATOR
+// SELECTION INDICATOR & CONTROLLED NAME TAG
 // =============================================================================
+
+function drawControlledLabelCanvas(player) {
+  const canvas = controlledLabelCanvas;
+  if (!canvas || !player) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const teamName = player.teamIndex === 0 ? TEAMS.home.name : TEAMS.away.name;
+  const text = `${teamName} #${player.slotIndex + 1}`;
+  const w = 128;
+  const h = 32;
+  const r = 6;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+  ctx.beginPath();
+  if (typeof ctx.roundRect === 'function') {
+    ctx.roundRect(0, 0, w, h, r);
+  } else {
+    ctx.moveTo(r, 0);
+    ctx.lineTo(w - r, 0);
+    ctx.quadraticCurveTo(w, 0, w, r);
+    ctx.lineTo(w, h - r);
+    ctx.quadraticCurveTo(w, h, w - r, h);
+    ctx.lineTo(r, h);
+    ctx.quadraticCurveTo(0, h, 0, h - r);
+    ctx.lineTo(0, r);
+    ctx.quadraticCurveTo(0, 0, r, 0);
+  }
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  let fontSize = 14;
+  ctx.font = `600 ${fontSize}px system-ui, "Segoe UI", sans-serif`;
+  while (ctx.measureText(text).width > w - 12 && fontSize > 9) {
+    fontSize -= 1;
+    ctx.font = `600 ${fontSize}px system-ui, "Segoe UI", sans-serif`;
+  }
+  ctx.fillText(text, w * 0.5, h * 0.5);
+  if (controlledLabelTexture) controlledLabelTexture.needsUpdate = true;
+}
+
+function createControlledNameLabel() {
+  if (controlledLabel) return;
+  controlledLabelCanvas = document.createElement('canvas');
+  controlledLabelCanvas.width = 128;
+  controlledLabelCanvas.height = 32;
+  controlledLabelTexture = new THREE.CanvasTexture(controlledLabelCanvas);
+  controlledLabelTexture.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.SpriteMaterial({
+    map: controlledLabelTexture,
+    transparent: true,
+    depthTest: true,
+    depthWrite: false,
+  });
+  controlledLabel = new THREE.Sprite(mat);
+  controlledLabel.scale.set(2.56, 0.64, 1);
+  controlledLabel.center.set(0.5, 0.5);
+  controlledLabel.renderOrder = 999;
+}
+
+function attachControlledLabelToPlayer(player) {
+  createControlledNameLabel();
+  if (!controlledLabel || !player?.mesh) return;
+  if (controlledLabel.parent) controlledLabel.parent.remove(controlledLabel);
+  drawControlledLabelCanvas(player);
+  player.mesh.add(controlledLabel);
+  controlledLabel.position.set(0, 2.4, 0);
+}
 
 function createSelectionIndicator() {
   const geo = new THREE.RingGeometry(0.55, 0.75, 32);
@@ -2354,8 +2523,161 @@ function drawMinimap() {
   }
 }
 
+function setupMobileControls() {
+  if (!('ontouchstart' in window)) return;
+
+  const zone = document.getElementById('joystick-zone');
+  const knob = document.getElementById('joystick-knob');
+  const passBtn = document.getElementById('btn-mobile-pass');
+  const shootBtn = document.getElementById('btn-mobile-shoot');
+  const sprintBtn = document.getElementById('btn-mobile-sprint');
+
+  const maxR = 50;
+  const deadR = 8;
+
+  function updateJoystick(clientX, clientY) {
+    if (!zone || !knob) return;
+    const rect = zone.getBoundingClientRect();
+    const cx = rect.left + rect.width * 0.5;
+    const cy = rect.top + rect.height * 0.5;
+    let dx = clientX - cx;
+    let dy = clientY - cy;
+    const len = Math.hypot(dx, dy);
+    if (len < deadR) {
+      touchMoveDir.set(0, 0);
+      knob.style.transform = 'translate(0, 0)';
+      return;
+    }
+    const clampedLen = Math.min(len, maxR);
+    dx = (dx / len) * clampedLen;
+    dy = (dy / len) * clampedLen;
+    const nlen = Math.hypot(dx, dy);
+    if (nlen < 1e-6) {
+      touchMoveDir.set(0, 0);
+      knob.style.transform = 'translate(0, 0)';
+      return;
+    }
+    touchMoveDir.set(dx / nlen, dy / nlen);
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+  }
+
+  function resetJoystick(tid) {
+    if (joystickActiveTouchId !== tid) return;
+    joystickActiveTouchId = null;
+    touchMoveDir.set(0, 0);
+    if (knob) knob.style.transform = 'translate(0, 0)';
+  }
+
+  if (zone) {
+    zone.addEventListener(
+      'touchstart',
+      (e) => {
+        e.preventDefault();
+        const t = e.changedTouches[0];
+        if (!t) return;
+        joystickActiveTouchId = t.identifier;
+        updateJoystick(t.clientX, t.clientY);
+      },
+      { passive: false }
+    );
+    zone.addEventListener(
+      'touchmove',
+      (e) => {
+        e.preventDefault();
+        for (let i = 0; i < e.changedTouches.length; i += 1) {
+          const t = e.changedTouches[i];
+          if (t.identifier === joystickActiveTouchId) {
+            updateJoystick(t.clientX, t.clientY);
+            break;
+          }
+        }
+      },
+      { passive: false }
+    );
+  }
+
+  function onGlobalTouchEnd(e) {
+    for (let i = 0; i < e.changedTouches.length; i += 1) {
+      resetJoystick(e.changedTouches[i].identifier);
+    }
+  }
+  window.addEventListener('touchend', onGlobalTouchEnd);
+  window.addEventListener('touchcancel', onGlobalTouchEnd);
+
+  if (passBtn) {
+    passBtn.addEventListener(
+      'touchstart',
+      (e) => {
+        e.preventDefault();
+        keySpacePressed = true;
+      },
+      { passive: false }
+    );
+  }
+
+  if (shootBtn) {
+    shootBtn.addEventListener(
+      'touchstart',
+      (e) => {
+        e.preventDefault();
+        const canShoot =
+          gameState === GAME_STATE.PLAYING &&
+          controlledPlayer &&
+          controlledPlayer.hasBall &&
+          ballOwner === controlledPlayer;
+        if (canShoot) {
+          shotCharging = true;
+          shotChargePct = 0;
+          touchShootHeld = true;
+        } else {
+          keyEPressed = true;
+        }
+      },
+      { passive: false }
+    );
+    const endShoot = (e) => {
+      e.preventDefault();
+      touchShootHeld = false;
+      if (shotCharging) {
+        if (
+          gameState === GAME_STATE.PLAYING &&
+          controlledPlayer &&
+          controlledPlayer.hasBall &&
+          ballOwner === controlledPlayer
+        ) {
+          performShoot(controlledPlayer, shotChargePct);
+        }
+        shotCharging = false;
+        shotChargePct = 0;
+      }
+    };
+    shootBtn.addEventListener('touchend', endShoot, { passive: false });
+    shootBtn.addEventListener('touchcancel', endShoot, { passive: false });
+  }
+
+  if (sprintBtn) {
+    sprintBtn.addEventListener(
+      'touchstart',
+      (e) => {
+        e.preventDefault();
+        keys.ShiftLeft = true;
+      },
+      { passive: false }
+    );
+    const endSprint = (e) => {
+      e.preventDefault();
+      keys.ShiftLeft = false;
+    };
+    sprintBtn.addEventListener('touchend', endSprint, { passive: false });
+    sprintBtn.addEventListener('touchcancel', endSprint, { passive: false });
+  }
+}
+
 function setupUIListeners() {
   window.addEventListener('keydown', (e) => {
+    if ('ontouchstart' in window) {
+      document.documentElement.classList.add('hide-mobile-controls');
+    }
     if (e.repeat) return;
     keys[e.code] = true;
     if (e.code === 'Space') e.preventDefault();
@@ -2416,6 +2738,7 @@ function setupUIListeners() {
 
   document.getElementById('btn-quick-match')?.addEventListener('click', () => {
     resetTeamsToDefault();
+    activeFormation = '4-3-3';
     startMatch();
   });
   document.getElementById('btn-custom-match')?.addEventListener('click', () => {
@@ -2424,8 +2747,11 @@ function setupUIListeners() {
   document.getElementById('btn-kick-off-custom')?.addEventListener('click', () => {
     const homeSel = document.getElementById('select-team-home');
     const awaySel = document.getElementById('select-team-away');
+    const formSel = document.getElementById('select-formation');
     if (homeSel?.value) applyTeamPreset('home', homeSel.value);
     if (awaySel?.value) applyTeamPreset('away', awaySel.value);
+    const fk = formSel?.value;
+    if (fk && FORMATIONS[fk]) activeFormation = fk;
     elMainMenu?.classList.remove('show-custom');
     startMatch();
   });
@@ -2441,6 +2767,11 @@ function setupUIListeners() {
   document.getElementById('btn-play-again')?.addEventListener('click', () => {
     setState(GAME_STATE.MENU);
   });
+
+  if ('ontouchstart' in window) {
+    document.documentElement.classList.add('has-touch');
+  }
+  setupMobileControls();
 
   window.addEventListener('keydown', (e) => {
     if (gameState === GAME_STATE.HALFTIME && e.code === 'Space') {

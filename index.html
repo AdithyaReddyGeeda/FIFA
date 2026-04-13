@@ -483,6 +483,102 @@
       line-height: 1;
       text-shadow: 0 1px 2px rgba(0,0,0,0.25);
     }
+
+    /* Mobile touch controls — shown only when html.has-touch */
+    #mobile-controls {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      pointer-events: none;
+      align-items: flex-end;
+      justify-content: space-between;
+      padding: 0 12px max(12px, env(safe-area-inset-bottom)) 12px;
+      gap: 16px;
+    }
+    html.has-touch #mobile-controls {
+      display: flex;
+    }
+    html.has-touch.hide-mobile-controls #mobile-controls {
+      display: none !important;
+    }
+    #joystick-zone {
+      pointer-events: auto;
+      position: relative;
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.35);
+      border: 2px solid rgba(255, 255, 255, 0.22);
+      box-shadow: inset 0 2px 12px rgba(0,0,0,0.35);
+      touch-action: none;
+      flex-shrink: 0;
+    }
+    #joystick-knob {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 44px;
+      height: 44px;
+      margin: -22px 0 0 -22px;
+      border-radius: 50%;
+      background: linear-gradient(180deg, rgba(248,250,252,0.95), rgba(203,213,225,0.9));
+      border: 2px solid rgba(15, 23, 42, 0.35);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+      pointer-events: none;
+    }
+    #mobile-actions {
+      pointer-events: auto;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 10px;
+      padding-bottom: 4px;
+    }
+    .mobile-btn {
+      min-width: 0;
+      padding: 10px 16px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      color: #0a1628;
+      background: linear-gradient(180deg, rgba(248,250,252,0.88), rgba(226,232,240,0.82));
+      box-shadow: 0 4px 14px rgba(0,0,0,0.28);
+      border: 1px solid rgba(255,255,255,0.28);
+      opacity: 0.92;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      line-height: 1.1;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .mobile-btn:active {
+      transform: scale(0.96);
+      opacity: 1;
+    }
+    .mobile-btn .mobile-btn-key {
+      font-size: 1.05rem;
+      letter-spacing: 0.06em;
+    }
+    .mobile-btn .mobile-btn-label {
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      opacity: 0.85;
+    }
+    .mobile-btn.mobile-btn-shoot {
+      background: linear-gradient(180deg, rgba(251, 191, 36, 0.9), rgba(217, 119, 6, 0.88));
+      color: #1c1917;
+    }
+    .mobile-btn.mobile-btn-sprint {
+      background: linear-gradient(180deg, rgba(74, 222, 128, 0.88), rgba(34, 197, 94, 0.85));
+      color: #052e16;
+    }
   </style>
 </head>
 <body>
@@ -498,13 +594,22 @@
   <div id="main-menu">
     <div class="main-menu-landing">
       <h1>FIFA SOCCER GAME</h1>
-      <p class="subtitle">Pick a match · 4-3-3</p>
+      <p class="subtitle">Pick a match · choose formation in Custom</p>
       <button type="button" class="menu-btn primary" id="btn-quick-match">Quick Match</button>
       <button type="button" class="menu-btn" id="btn-custom-match">Custom Match</button>
     </div>
     <div id="custom-match-panel" aria-hidden="true">
       <h2>CUSTOM MATCH</h2>
       <p class="custom-hint">Home and away kits (primary hex on each option)</p>
+      <div class="custom-select-row">
+        <label for="select-formation">Formation</label>
+        <select id="select-formation">
+          <option value="4-3-3" selected>4-3-3</option>
+          <option value="4-4-2">4-4-2</option>
+          <option value="3-5-2">3-5-2</option>
+          <option value="5-3-2">5-3-2</option>
+        </select>
+      </div>
       <div class="custom-select-row">
         <label for="select-team-home">Home</label>
         <select id="select-team-home">
@@ -625,6 +730,26 @@
     </div>
     <div id="card-popup" aria-live="polite">
       <span id="card-popup-number">0</span>
+    </div>
+  </div>
+
+  <div id="mobile-controls" aria-label="Touch controls">
+    <div id="joystick-zone">
+      <div id="joystick-knob"></div>
+    </div>
+    <div id="mobile-actions">
+      <button type="button" class="mobile-btn" id="btn-mobile-pass" aria-label="Pass">
+        <span class="mobile-btn-key">A</span>
+        <span class="mobile-btn-label">Pass</span>
+      </button>
+      <button type="button" class="mobile-btn mobile-btn-shoot" id="btn-mobile-shoot" aria-label="Shoot">
+        <span class="mobile-btn-key">B</span>
+        <span class="mobile-btn-label">Shoot</span>
+      </button>
+      <button type="button" class="mobile-btn mobile-btn-sprint" id="btn-mobile-sprint" aria-label="Sprint">
+        <span class="mobile-btn-key">S</span>
+        <span class="mobile-btn-label">Sprint</span>
+      </button>
     </div>
   </div>
 
