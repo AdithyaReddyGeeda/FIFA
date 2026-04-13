@@ -364,6 +364,13 @@
       font-size: 1.15rem;
       font-variant-numeric: tabular-nums;
     }
+    #match-timer.injury-time {
+      animation: injury-time-pulse 0.9s ease-in-out infinite;
+    }
+    @keyframes injury-time-pulse {
+      0%, 100% { color: #ffffff; }
+      50% { color: #ff4444; }
+    }
 
     #stamina-wrap {
       position: absolute;
