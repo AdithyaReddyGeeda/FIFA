@@ -89,14 +89,53 @@ const GAME_CONFIG = {
   userTeamIndex: 0,
 };
 
-const TEAMS = {
-  home: {
+/**
+ * Preset clubs: primary = shirt, secondary = shorts/trim, accent = detail.
+ * Keys match <select> option values in index.html.
+ */
+const TEAM_PRESETS = {
+  barcelona: {
     name: 'Barcelona',
     colors: { primary: 0xa50044, secondary: 0x004d98, accent: 0xedbb00 },
   },
-  away: {
+  realmadrid: {
     name: 'Real Madrid',
     colors: { primary: 0xffffff, secondary: 0x00529f, accent: 0xfeb801 },
+  },
+  mancity: {
+    name: 'Man City',
+    colors: { primary: 0x6cabdd, secondary: 0xffffff, accent: 0x1c2c5b },
+  },
+  liverpool: {
+    name: 'Liverpool',
+    colors: { primary: 0xc8102e, secondary: 0xffffff, accent: 0xf6eb61 },
+  },
+  bayern: {
+    name: 'Bayern Munich',
+    colors: { primary: 0xdc052d, secondary: 0xffffff, accent: 0x0066b2 },
+  },
+  psg: {
+    name: 'PSG',
+    colors: { primary: 0x004170, secondary: 0xed1c24, accent: 0xffffff },
+  },
+  juventus: {
+    name: 'Juventus',
+    colors: { primary: 0x1a1a1a, secondary: 0xffffff, accent: 0xffea00 },
+  },
+  chelsea: {
+    name: 'Chelsea',
+    colors: { primary: 0x034694, secondary: 0xffffff, accent: 0xed1c24 },
+  },
+};
+
+const TEAMS = {
+  home: {
+    name: TEAM_PRESETS.barcelona.name,
+    colors: { ...TEAM_PRESETS.barcelona.colors },
+  },
+  away: {
+    name: TEAM_PRESETS.realmadrid.name,
+    colors: { ...TEAM_PRESETS.realmadrid.colors },
   },
 };
 
@@ -181,6 +220,7 @@ const tmpV2 = new THREE.Vector3();
 const tmpV3 = new THREE.Vector3();
 
 let goalPopupTimer = 0;
+let offsidePopupTimer = 0;
 let uiTimerAccum = 0;
 
 /** @type {AudioContext | null} */
@@ -203,6 +243,7 @@ let elFulltimeScore;
 let elFulltimeResult;
 let elGoalPopup;
 let elGoalTeamName;
+let elOffsidePopup;
 let minimapCanvas;
 let minimapCtx;
 let elShotBar;
@@ -258,6 +299,7 @@ class Player {
       roughness: 0.55,
       metalness: 0.08,
     });
+    bodyMat.userData.kitSlot = 'primary';
     const body = new THREE.Mesh(bodyGeo, bodyMat);
     body.position.y = bodyH * 0.5 + 0.08;
     body.castShadow = true;
@@ -272,6 +314,7 @@ class Player {
       roughness: 0.65,
       metalness: 0.05,
     });
+    legMat.userData.kitSlot = 'secondary';
     const hipY = -bodyH * 0.38;
     const hipX = PLAYER_CONFIG.bodyRadius * 0.34;
 
@@ -285,7 +328,9 @@ class Player {
 
     this.legPivotR = new THREE.Group();
     this.legPivotR.position.set(hipX, hipY, 0);
-    const legMeshR = new THREE.Mesh(legGeo.clone(), legMat.clone());
+    const legMatR = legMat.clone();
+    legMatR.userData.kitSlot = 'secondary';
+    const legMeshR = new THREE.Mesh(legGeo.clone(), legMatR);
     legMeshR.position.y = -legLen * 0.5;
     legMeshR.castShadow = true;
     this.legPivotR.add(legMeshR);
@@ -336,6 +381,7 @@ class Player {
       color: team.colors.secondary,
       roughness: 0.6,
     });
+    shortsMat.userData.kitSlot = 'secondary';
     const shorts = new THREE.Mesh(shortsGeo, shortsMat);
     shorts.position.y = bodyH * 0.2;
     shorts.castShadow = true;
@@ -343,6 +389,21 @@ class Player {
 
     this.mesh = group;
     this.mesh.userData.player = this;
+  }
+
+  /** Sync body / shorts / legs to current TEAMS colors (after custom match). */
+  applyKitColors() {
+    const team = this.teamIndex === 0 ? TEAMS.home : TEAMS.away;
+    const { primary, secondary } = team.colors;
+    this.mesh.traverse((obj) => {
+      if (!obj.isMesh || !obj.material) return;
+      const slot = obj.material.userData?.kitSlot;
+      if (slot === 'primary' && obj.material.color) {
+        obj.material.color.setHex(primary);
+      } else if (slot === 'secondary' && obj.material.color) {
+        obj.material.color.setHex(secondary);
+      }
+    });
   }
 
   get position() {
@@ -695,6 +756,25 @@ function createBallShadow() {
 // TEAMS & FORMATIONS
 // =============================================================================
 
+/**
+ * @param {'home' | 'away'} side
+ * @param {string} presetId — key of TEAM_PRESETS
+ */
+function applyTeamPreset(side, presetId) {
+  const preset = TEAM_PRESETS[presetId];
+  if (!preset) return;
+  const target = side === 'home' ? TEAMS.home : TEAMS.away;
+  target.name = preset.name;
+  target.colors.primary = preset.colors.primary;
+  target.colors.secondary = preset.colors.secondary;
+  target.colors.accent = preset.colors.accent;
+}
+
+function resetTeamsToDefault() {
+  applyTeamPreset('home', 'barcelona');
+  applyTeamPreset('away', 'realmadrid');
+}
+
 function computeFormationWorld(teamIndex, slot) {
   const slotData = FORMATION_SLOTS[slot];
   if (!slotData) return new THREE.Vector3();
@@ -728,6 +808,8 @@ function setupTeams() {
   players.forEach((p) => {
     p.isUserControlled = p === controlledPlayer;
   });
+
+  players.forEach((p) => p.applyKitColors());
 }
 
 function resetPlayersToFormation() {
@@ -982,6 +1064,53 @@ function getAttackingGoalZ(teamIndex) {
   return sign * (sidesSwapped ? -1 : 1) * PITCH_CONFIG.halfLength;
 }
 
+/** Distance along pitch Z to the goal this team attacks (smaller = closer to that goal line). */
+function distToAttackingGoalZ(teamIndex, z) {
+  return Math.abs(getAttackingGoalZ(teamIndex) - z);
+}
+
+/**
+ * Offside: in opponents' half and nearer their goal line than both the ball (passer)
+ * and the second-last opponent. Uses getAttackingGoalZ(teamIndex) as the attack axis.
+ */
+function isReceiverOffside(passer, receiver) {
+  const team = passer.teamIndex;
+  const gz = getAttackingGoalZ(team);
+  const dist = (z) => distToAttackingGoalZ(team, z);
+
+  if (gz > 0 && receiver.position.z <= 0) return false;
+  if (gz < 0 && receiver.position.z >= 0) return false;
+
+  const opps = players.filter((p) => p.teamIndex !== team);
+  if (opps.length < 2) return false;
+
+  opps.sort((a, b) => dist(a.position.z) - dist(b.position.z));
+  const dSecond = dist(opps[1].position.z);
+  const dRecv = dist(receiver.position.z);
+  const dPass = dist(passer.position.z);
+
+  if (dRecv >= dPass) return false;
+  if (dRecv >= dSecond) return false;
+  return true;
+}
+
+function resetBallToPasser(passer) {
+  if (!passer || !gameBall) return;
+  ballOwner = passer;
+  passer.hasBall = true;
+  ballVelocity.set(0, 0, 0);
+  const off = tmpV1
+    .set(Math.sin(passer.rotation), 0, Math.cos(passer.rotation))
+    .multiplyScalar(0.9);
+  gameBall.position.copy(passer.position).add(off);
+  gameBall.position.y = GAME_CONFIG.ballRadius;
+}
+
+function showOffside() {
+  offsidePopupTimer = 2;
+  if (elOffsidePopup) elOffsidePopup.classList.add('show');
+}
+
 function performPass(player) {
   if (!player || !player.hasBall || player !== ballOwner) return;
   const mate = getClosestTeammate(player);
@@ -989,6 +1118,11 @@ function performPass(player) {
   let dir = tmpV2.subVectors(mate.position, player.position);
   dir.y = 0;
   if (dir.lengthSq() < 1e-4) return;
+  if (isReceiverOffside(player, mate)) {
+    showOffside();
+    resetBallToPasser(player);
+    return;
+  }
   dir.normalize();
   dir = applyAccuracy(dir, PLAYER_CONFIG.passAccuracy);
   const power = GAME_CONFIG.kickBasePower * GAME_CONFIG.passPowerMul;
@@ -1045,6 +1179,11 @@ function performThroughBall(player) {
   let dir = tmpV2.subVectors(mate.position, player.position);
   dir.y = 0;
   if (dir.lengthSq() < 1e-4) return;
+  if (isReceiverOffside(player, mate)) {
+    showOffside();
+    resetBallToPasser(player);
+    return;
+  }
   dir.normalize();
   dir = applyAccuracy(dir, PLAYER_CONFIG.passAccuracy);
   const power = GAME_CONFIG.kickBasePower * GAME_CONFIG.throughPowerMul;
@@ -1445,6 +1584,7 @@ function setState(next) {
   if (next === GAME_STATE.MENU) {
     cameraMode = 'BROADCAST';
     if (cameraPersp) camera = cameraPersp;
+    if (elMainMenu) elMainMenu.classList.remove('show-custom');
   }
 
   if (elLoadingScreen) elLoadingScreen.classList.toggle('hidden', next !== GAME_STATE.LOADING);
@@ -1684,6 +1824,13 @@ function updateUI(deltaTime) {
     if (goalPopupTimer <= 0 && elGoalPopup) elGoalPopup.classList.remove('show');
   }
 
+  if (offsidePopupTimer > 0) {
+    offsidePopupTimer -= deltaTime;
+    if (offsidePopupTimer <= 0 && elOffsidePopup) {
+      elOffsidePopup.classList.remove('show');
+    }
+  }
+
   if (gameState === GAME_STATE.FULLTIME) {
     updateFulltimeStatsPanel();
   }
@@ -1789,8 +1936,24 @@ function setupUIListeners() {
     keys[e.code] = false;
   });
 
-  document.getElementById('btn-quick-match')?.addEventListener('click', () => startMatch());
-  document.getElementById('btn-custom-match')?.addEventListener('click', () => startMatch());
+  document.getElementById('btn-quick-match')?.addEventListener('click', () => {
+    resetTeamsToDefault();
+    startMatch();
+  });
+  document.getElementById('btn-custom-match')?.addEventListener('click', () => {
+    elMainMenu?.classList.add('show-custom');
+  });
+  document.getElementById('btn-kick-off-custom')?.addEventListener('click', () => {
+    const homeSel = document.getElementById('select-team-home');
+    const awaySel = document.getElementById('select-team-away');
+    if (homeSel?.value) applyTeamPreset('home', homeSel.value);
+    if (awaySel?.value) applyTeamPreset('away', awaySel.value);
+    elMainMenu?.classList.remove('show-custom');
+    startMatch();
+  });
+  document.getElementById('btn-custom-back')?.addEventListener('click', () => {
+    elMainMenu?.classList.remove('show-custom');
+  });
   document.getElementById('btn-resume')?.addEventListener('click', () => setState(GAME_STATE.PLAYING));
   document.getElementById('btn-pause-main')?.addEventListener('click', () => setState(GAME_STATE.MENU));
   document.getElementById('btn-continue-half')?.addEventListener('click', () => {
@@ -1827,6 +1990,7 @@ function cacheDom() {
   elFulltimeResult = document.getElementById('fulltime-result');
   elGoalPopup = document.getElementById('goal-popup');
   elGoalTeamName = document.getElementById('goal-team-name');
+  elOffsidePopup = document.getElementById('offside-popup');
   minimapCanvas = document.getElementById('minimap-canvas');
   minimapCtx = minimapCanvas?.getContext('2d') || null;
   elShotBar = document.getElementById('shot-bar');

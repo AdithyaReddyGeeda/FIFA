@@ -77,6 +77,55 @@
       text-shadow: 0 2px 24px rgba(0,0,0,0.35);
     }
     #main-menu .subtitle { opacity: 0.75; margin-bottom: 2.5rem; font-size: 1.05rem; }
+    #main-menu.show-custom .main-menu-landing { display: none; }
+    #custom-match-panel {
+      display: none;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 1rem;
+      width: min(380px, 90vw);
+      padding: 0 0.5rem;
+    }
+    #main-menu.show-custom #custom-match-panel { display: flex; }
+    #custom-match-panel h2 {
+      font-size: 1.35rem;
+      text-align: center;
+      letter-spacing: 0.12em;
+      margin-bottom: 0.25rem;
+    }
+    #custom-match-panel .custom-hint {
+      text-align: center;
+      opacity: 0.75;
+      font-size: 0.9rem;
+      margin-bottom: 0.5rem;
+    }
+    .custom-select-row {
+      display: grid;
+      grid-template-columns: 72px 1fr;
+      align-items: center;
+      gap: 10px;
+    }
+    .custom-select-row label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #cbd5e1;
+    }
+    .custom-select-row select {
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(0,0,0,0.35);
+      color: #f8fafc;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    .custom-select-row select option { background: #1e293b; color: #f8fafc; }
+    #custom-match-panel .custom-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 0.5rem;
+    }
     .menu-btn {
       min-width: 220px;
       padding: 14px 28px;
@@ -340,6 +389,34 @@
     }
     #goal-popup .goal-title { font-size: 2.2rem; font-weight: 800; letter-spacing: 0.15em; }
     #goal-popup .goal-team { font-size: 1.25rem; margin-top: 8px; opacity: 0.95; }
+
+    #offside-popup {
+      position: absolute;
+      top: 42%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0);
+      padding: 22px 56px;
+      background: linear-gradient(180deg, rgba(185, 28, 28, 0.98), rgba(127, 29, 29, 0.99));
+      border-radius: 16px;
+      color: #fff;
+      text-align: center;
+      pointer-events: none;
+      opacity: 0;
+      transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), opacity 0.22s;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+      z-index: 21;
+      border: 2px solid rgba(254, 202, 202, 0.35);
+    }
+    #offside-popup.show {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+    }
+    #offside-popup .offside-title {
+      font-size: 2rem;
+      font-weight: 900;
+      letter-spacing: 0.28em;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.45);
+    }
   </style>
 </head>
 <body>
@@ -353,10 +430,46 @@
   </div>
 
   <div id="main-menu">
-    <h1>FIFA SOCCER GAME</h1>
-    <p class="subtitle">Barcelona vs Real Madrid · 4-3-3</p>
-    <button type="button" class="menu-btn primary" id="btn-quick-match">Quick Match</button>
-    <button type="button" class="menu-btn" id="btn-custom-match">Custom Match</button>
+    <div class="main-menu-landing">
+      <h1>FIFA SOCCER GAME</h1>
+      <p class="subtitle">Pick a match · 4-3-3</p>
+      <button type="button" class="menu-btn primary" id="btn-quick-match">Quick Match</button>
+      <button type="button" class="menu-btn" id="btn-custom-match">Custom Match</button>
+    </div>
+    <div id="custom-match-panel" aria-hidden="true">
+      <h2>CUSTOM MATCH</h2>
+      <p class="custom-hint">Home and away kits (primary hex on each option)</p>
+      <div class="custom-select-row">
+        <label for="select-team-home">Home</label>
+        <select id="select-team-home">
+          <option value="barcelona" data-primary="#A50044">Barcelona (#A50044)</option>
+          <option value="realmadrid" data-primary="#FFFFFF">Real Madrid (#FFFFFF)</option>
+          <option value="mancity" data-primary="#6CABDD">Man City (#6CABDD)</option>
+          <option value="liverpool" data-primary="#C8102E">Liverpool (#C8102E)</option>
+          <option value="bayern" data-primary="#DC052D">Bayern Munich (#DC052D)</option>
+          <option value="psg" data-primary="#004170">PSG (#004170)</option>
+          <option value="juventus" data-primary="#1A1A1A">Juventus (#1A1A1A)</option>
+          <option value="chelsea" data-primary="#034694">Chelsea (#034694)</option>
+        </select>
+      </div>
+      <div class="custom-select-row">
+        <label for="select-team-away">Away</label>
+        <select id="select-team-away">
+          <option value="barcelona" data-primary="#A50044">Barcelona (#A50044)</option>
+          <option value="realmadrid" data-primary="#FFFFFF" selected>Real Madrid (#FFFFFF)</option>
+          <option value="mancity" data-primary="#6CABDD">Man City (#6CABDD)</option>
+          <option value="liverpool" data-primary="#C8102E">Liverpool (#C8102E)</option>
+          <option value="bayern" data-primary="#DC052D">Bayern Munich (#DC052D)</option>
+          <option value="psg" data-primary="#004170">PSG (#004170)</option>
+          <option value="juventus" data-primary="#1A1A1A">Juventus (#1A1A1A)</option>
+          <option value="chelsea" data-primary="#034694">Chelsea (#034694)</option>
+        </select>
+      </div>
+      <div class="custom-actions">
+        <button type="button" class="menu-btn primary" id="btn-kick-off-custom">Kick Off</button>
+        <button type="button" class="menu-btn" id="btn-custom-back">Back</button>
+      </div>
+    </div>
   </div>
 
   <div id="pause-menu">
@@ -437,6 +550,9 @@
     <div id="goal-popup">
       <div class="goal-title">GOAL!</div>
       <div class="goal-team" id="goal-team-name">Team</div>
+    </div>
+    <div id="offside-popup">
+      <div class="offside-title">OFFSIDE</div>
     </div>
   </div>
 
