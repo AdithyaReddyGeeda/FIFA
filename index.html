@@ -221,6 +221,28 @@
       transform: scaleX(1);
     }
 
+    #shot-wrap {
+      position: absolute;
+      bottom: 52px;
+      right: 20px;
+      width: 180px;
+    }
+    #shot-wrap label {
+      display: block;
+      color: #fde68a;
+      font-size: 0.75rem;
+      margin-bottom: 4px;
+      text-shadow: 0 1px 2px #000;
+    }
+    #shot-bar {
+      height: 100%;
+      width: 0%;
+      border-radius: 7px;
+      background: linear-gradient(90deg, #ca8a04, #f59e0b, #fb923c);
+      box-shadow: 0 0 8px rgba(251, 146, 60, 0.35);
+      transition: width 0.04s linear;
+    }
+
     #radar-wrap {
       position: absolute;
       top: 16px;
@@ -320,6 +342,10 @@
   <div id="hud">
     <div id="scoreboard">HOME - AWAY</div>
     <div id="match-timer">00:00</div>
+    <div id="shot-wrap">
+      <label>Shot power</label>
+      <div class="stamina-bar-bg"><div id="shot-bar"></div></div>
+    </div>
     <div id="stamina-wrap">
       <label>Stamina</label>
       <div class="stamina-bar-bg"><div id="stamina-fill"></div></div>
@@ -329,7 +355,8 @@
       <strong>Controls</strong><br />
       W A S D — Move · SHIFT — Sprint<br />
       SPACE — Pass / Switch player<br />
-      E — Shoot / Tackle · Q — Through ball<br />
+      Hold E — Shoot (charge) · E — Tackle<br />
+      Q — Through ball<br />
       ESC — Pause
     </div>
     <div id="goal-popup">

@@ -76,6 +76,8 @@ const GAME_CONFIG = {
   throughPowerMul: 0.9,
   shootPowerMul: 1.0,
   kickBasePower: 28,
+  /** Seconds to reach full shot charge while holding E */
+  shotChargeDuration: 1.2,
   goalLineZHome: -52.5,
   goalLineZAway: 52.5,
   goalWidth: 7.32,
@@ -153,6 +155,9 @@ const keys = {};
 let keySpacePressed = false;
 let keyEPressed = false;
 let keyQPressed = false;
+/** User shot charge 0–1 while holding E with the ball */
+let shotChargePct = 0;
+let shotCharging = false;
 
 const cameraTargetPos = new THREE.Vector3();
 const cameraLookTarget = new THREE.Vector3();
@@ -162,6 +167,9 @@ const tmpV3 = new THREE.Vector3();
 
 let goalPopupTimer = 0;
 let uiTimerAccum = 0;
+
+/** @type {AudioContext | null} */
+let audioCtx = null;
 
 // DOM
 let elLoadingScreen;
@@ -182,6 +190,7 @@ let elGoalPopup;
 let elGoalTeamName;
 let minimapCanvas;
 let minimapCtx;
+let elShotBar;
 
 // =============================================================================
 // PLAYER CLASS
@@ -843,6 +852,91 @@ function checkBallControl() {
 // PASS / SHOOT / THROUGH / TACKLE / SWITCH
 // =============================================================================
 
+// =============================================================================
+// WEB AUDIO (lightweight, no external libs)
+// =============================================================================
+
+function initAudio() {
+  if (audioCtx) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audioCtx = new AC();
+  } catch {
+    audioCtx = null;
+  }
+}
+
+/**
+ * @param {'kick' | 'whistle' | 'crowd_cheer'} type
+ */
+function playSound(type) {
+  initAudio();
+  if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
+
+  const t0 = audioCtx.currentTime;
+  const eps = 0.0001;
+
+  if (type === 'kick') {
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(180, t0);
+    g.gain.setValueAtTime(eps, t0);
+    g.gain.exponentialRampToValueAtTime(0.22, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(eps, t0 + 0.08);
+    osc.connect(g);
+    g.connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.085);
+    return;
+  }
+
+  if (type === 'whistle') {
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(2200, t0);
+    g.gain.setValueAtTime(eps, t0);
+    g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.025);
+    g.gain.exponentialRampToValueAtTime(eps, t0 + 0.6);
+    osc.connect(g);
+    g.connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.62);
+    return;
+  }
+
+  if (type === 'crowd_cheer') {
+    const dur = 1.2;
+    const n = Math.max(1, Math.floor(audioCtx.sampleRate * dur));
+    const buffer = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
+    const ch = buffer.getChannelData(0);
+    for (let i = 0; i < n; i++) {
+      ch[i] = Math.random() * 2 - 1;
+    }
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(650, t0);
+    filter.Q.setValueAtTime(0.7, t0);
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(eps, t0);
+    g.gain.exponentialRampToValueAtTime(0.14, t0 + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.1, t0 + 0.45);
+    g.gain.exponentialRampToValueAtTime(eps, t0 + dur);
+    src.connect(filter);
+    filter.connect(g);
+    g.connect(audioCtx.destination);
+    src.start(t0);
+    src.stop(t0 + dur + 0.02);
+  }
+}
+
 function getClosestTeammate(player) {
   let best = null;
   let bestD = 1e9;
@@ -876,10 +970,14 @@ function performPass(player) {
   player.hasBall = false;
   ballVelocity.copy(dir.multiplyScalar(power));
   ballVelocity.y = 6;
+  playSound('kick');
   checkBallControl();
 }
 
-function performShoot(player) {
+/**
+ * @param {number} [charge01=1] — 0–1 charge; AI uses full 1. Power = kickBasePower * (0.4 + charge * 0.6)
+ */
+function performShoot(player, charge01 = 1) {
   if (!player || !player.hasBall || player !== ballOwner) return;
   const gz = getAttackingGoalZ(player.teamIndex);
   const target = tmpV2.set(0, 0, gz);
@@ -888,11 +986,13 @@ function performShoot(player) {
   if (dir.lengthSq() < 1e-4) return;
   dir.normalize();
   dir = applyAccuracy(dir, PLAYER_CONFIG.shotAccuracy);
-  const power = GAME_CONFIG.kickBasePower * GAME_CONFIG.shootPowerMul;
+  const c = THREE.MathUtils.clamp(charge01, 0, 1);
+  const power = GAME_CONFIG.kickBasePower * (0.4 + c * 0.6);
   releaseBallFromOwner();
   player.hasBall = false;
   ballVelocity.copy(dir.multiplyScalar(power));
   ballVelocity.y = 3.5;
+  playSound('kick');
 }
 
 function getThroughBallTarget(player) {
@@ -924,6 +1024,7 @@ function performThroughBall(player) {
   player.hasBall = false;
   ballVelocity.copy(dir.multiplyScalar(power));
   ballVelocity.y = 9;
+  playSound('kick');
 }
 
 function performTackle(player) {
@@ -975,6 +1076,8 @@ function switchToClosestPlayer() {
 // =============================================================================
 
 function showGoal(teamName) {
+  playSound('whistle');
+  playSound('crowd_cheer');
   goalPopupTimer = 3;
   if (elGoalPopup && elGoalTeamName) {
     elGoalTeamName.textContent = teamName;
@@ -1027,6 +1130,27 @@ function getMovementVector() {
 
 function updatePlayerMovement(deltaTime) {
   if (!controlledPlayer) return;
+
+  if (
+    shotCharging &&
+    (!controlledPlayer.hasBall || ballOwner !== controlledPlayer)
+  ) {
+    shotCharging = false;
+    shotChargePct = 0;
+  }
+
+  if (
+    shotCharging &&
+    keys.KeyE &&
+    controlledPlayer.hasBall &&
+    ballOwner === controlledPlayer
+  ) {
+    shotChargePct = Math.min(
+      1,
+      shotChargePct + deltaTime / GAME_CONFIG.shotChargeDuration
+    );
+  }
+
   const dir = getMovementVector();
   const sprint = !!(keys.ShiftLeft || keys.ShiftRight);
   controlledPlayer.move(dir, sprint, deltaTime);
@@ -1041,11 +1165,7 @@ function updatePlayerMovement(deltaTime) {
   }
   if (keyEPressed) {
     keyEPressed = false;
-    if (controlledPlayer.hasBall && ballOwner === controlledPlayer) {
-      performShoot(controlledPlayer);
-    } else {
-      performTackle(controlledPlayer);
-    }
+    performTackle(controlledPlayer);
   }
   if (keyQPressed) {
     keyQPressed = false;
@@ -1275,7 +1395,13 @@ function beginSecondHalf() {
 }
 
 function setState(next) {
+  const prev = gameState;
   gameState = next;
+
+  if (prev === GAME_STATE.PLAYING && next !== GAME_STATE.PLAYING) {
+    shotCharging = false;
+    shotChargePct = 0;
+  }
 
   if (elLoadingScreen) elLoadingScreen.classList.toggle('hidden', next !== GAME_STATE.LOADING);
   if (elMainMenu) elMainMenu.classList.toggle('visible', next === GAME_STATE.MENU);
@@ -1301,11 +1427,14 @@ function setState(next) {
 }
 
 function startMatch() {
+  playSound('whistle');
   homeScore = 0;
   awayScore = 0;
   matchTimeSec = 0;
   currentHalf = 1;
   sidesSwapped = false;
+  shotCharging = false;
+  shotChargePct = 0;
   resetPlayersToFormation();
   setupTeams();
   setState(GAME_STATE.PLAYING);
@@ -1386,6 +1515,10 @@ function updateUI(deltaTime) {
     elStaminaFill.style.transform = `scaleX(${Math.max(0.05, pct)})`;
   }
 
+  if (elShotBar) {
+    elShotBar.style.width = shotCharging ? `${shotChargePct * 100}%` : '0%';
+  }
+
   if (goalPopupTimer > 0) {
     goalPopupTimer -= deltaTime;
     if (goalPopupTimer <= 0 && elGoalPopup) elGoalPopup.classList.remove('show');
@@ -1438,7 +1571,19 @@ function setupUIListeners() {
     keys[e.code] = true;
     if (e.code === 'Space') e.preventDefault();
     if (e.code === 'Space') keySpacePressed = true;
-    if (e.code === 'KeyE') keyEPressed = true;
+    if (e.code === 'KeyE') {
+      const canShoot =
+        gameState === GAME_STATE.PLAYING &&
+        controlledPlayer &&
+        controlledPlayer.hasBall &&
+        ballOwner === controlledPlayer;
+      if (canShoot) {
+        shotCharging = true;
+        shotChargePct = 0;
+      } else {
+        keyEPressed = true;
+      }
+    }
     if (e.code === 'KeyQ') keyQPressed = true;
     if (e.code === 'Escape') {
       e.preventDefault();
@@ -1447,6 +1592,20 @@ function setupUIListeners() {
     }
   });
   window.addEventListener('keyup', (e) => {
+    if (e.code === 'KeyE') {
+      if (shotCharging) {
+        if (
+          gameState === GAME_STATE.PLAYING &&
+          controlledPlayer &&
+          controlledPlayer.hasBall &&
+          ballOwner === controlledPlayer
+        ) {
+          performShoot(controlledPlayer, shotChargePct);
+        }
+        shotCharging = false;
+        shotChargePct = 0;
+      }
+    }
     keys[e.code] = false;
   });
 
@@ -1490,6 +1649,7 @@ function cacheDom() {
   elGoalTeamName = document.getElementById('goal-team-name');
   minimapCanvas = document.getElementById('minimap-canvas');
   minimapCtx = minimapCanvas?.getContext('2d') || null;
+  elShotBar = document.getElementById('shot-bar');
 }
 
 function onResize() {
@@ -1560,6 +1720,7 @@ function animate() {
 
 async function initGame() {
   cacheDom();
+  initAudio();
   const canvas = document.getElementById('game-canvas');
   if (!canvas) return;
 
