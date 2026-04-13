@@ -417,6 +417,34 @@
       letter-spacing: 0.28em;
       text-shadow: 0 2px 8px rgba(0,0,0,0.45);
     }
+
+    #set-piece-popup {
+      position: absolute;
+      top: 38%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0);
+      padding: 20px 44px;
+      background: linear-gradient(180deg, rgba(30, 58, 138, 0.96), rgba(15, 23, 42, 0.98));
+      border-radius: 14px;
+      color: #fef3c7;
+      text-align: center;
+      pointer-events: none;
+      opacity: 0;
+      transition: transform 0.32s cubic-bezier(0.34,1.56,0.64,1), opacity 0.22s;
+      box-shadow: 0 10px 36px rgba(0,0,0,0.5);
+      z-index: 22;
+      border: 2px solid rgba(251, 191, 36, 0.35);
+    }
+    #set-piece-popup.show {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+    }
+    #set-piece-text {
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: 0.22em;
+      text-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    }
   </style>
 </head>
 <body>
@@ -553,6 +581,9 @@
     </div>
     <div id="offside-popup">
       <div class="offside-title">OFFSIDE</div>
+    </div>
+    <div id="set-piece-popup">
+      <div id="set-piece-text">RESTART</div>
     </div>
   </div>
 
