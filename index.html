@@ -153,7 +153,49 @@
     #fulltime-screen.visible { display: flex; }
     #fulltime-screen h2 { font-size: 2.2rem; letter-spacing: 0.2em; margin-bottom: 0.5rem; }
     #fulltime-score { font-size: 2.8rem; margin: 1rem 0; }
-    #fulltime-result { font-size: 1.5rem; color: #4ade80; margin-bottom: 1.5rem; }
+    #fulltime-result { font-size: 1.5rem; color: #4ade80; margin-bottom: 0.75rem; }
+    #fulltime-stats-wrap {
+      width: min(420px, 92vw);
+      margin: 0 0 1.25rem;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(0,0,0,0.35);
+    }
+    .fulltime-stats-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+    .fulltime-stats-table th,
+    .fulltime-stats-table td {
+      padding: 10px 12px;
+      text-align: center;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .fulltime-stats-table thead th {
+      background: rgba(30,50,80,0.6);
+      font-weight: 700;
+      font-size: 0.82rem;
+      letter-spacing: 0.04em;
+      color: #e2e8f0;
+    }
+    .fulltime-stats-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+    .fulltime-stats-table .ft-mid {
+      color: #94a3b8;
+      font-weight: 500;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      width: 38%;
+    }
+    .fulltime-stats-table tbody td:not(.ft-mid) {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      color: #f8fafc;
+    }
 
     /* HUD */
     #hud {
@@ -336,6 +378,39 @@
     <h2>FULL TIME</h2>
     <div id="fulltime-score">0 - 0</div>
     <div id="fulltime-result">DRAW</div>
+    <div id="fulltime-stats-wrap">
+      <table class="fulltime-stats-table" aria-label="Match statistics">
+        <thead>
+          <tr>
+            <th id="ft-team-home">Home</th>
+            <th class="ft-mid">Stat</th>
+            <th id="ft-team-away">Away</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td id="ft-poss-h">—</td>
+            <td class="ft-mid">Possession %</td>
+            <td id="ft-poss-a">—</td>
+          </tr>
+          <tr>
+            <td id="ft-shots-h">0</td>
+            <td class="ft-mid">Shots</td>
+            <td id="ft-shots-a">0</td>
+          </tr>
+          <tr>
+            <td id="ft-sot-h">0</td>
+            <td class="ft-mid">Shots on target</td>
+            <td id="ft-sot-a">0</td>
+          </tr>
+          <tr>
+            <td id="ft-pass-h">0</td>
+            <td class="ft-mid">Passes completed</td>
+            <td id="ft-pass-a">0</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     <button type="button" class="menu-btn primary" id="btn-play-again">Play Again</button>
   </div>
 
@@ -356,7 +431,7 @@
       W A S D — Move · SHIFT — Sprint<br />
       SPACE — Pass / Switch player<br />
       Hold E — Shoot (charge) · E — Tackle<br />
-      Q — Through ball<br />
+      Q — Through ball · C — Camera mode<br />
       ESC — Pause
     </div>
     <div id="goal-popup">

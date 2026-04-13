@@ -130,6 +130,10 @@ const GAME_STATE = {
 
 let scene;
 let camera;
+/** @type {THREE.PerspectiveCamera | null} */
+let cameraPersp = null;
+/** @type {THREE.OrthographicCamera | null} */
+let cameraOrtho = null;
 let renderer;
 let clock;
 let gameState = GAME_STATE.LOADING;
@@ -146,6 +150,14 @@ let selectionRingMat = null;
 
 let homeScore = 0;
 let awayScore = 0;
+/** Possession proxy: count each time a team gains control in checkBallControl */
+const touches = [0, 0];
+const shots = [0, 0];
+const shotsOnTarget = [0, 0];
+const passesCompleted = [0, 0];
+/** Clock time of last GK save stat (per defending team) to avoid spam */
+const lastGkSaveStatAt = [0, 0];
+
 let matchTimeSec = 0;
 let currentHalf = 1;
 /** After halftime, teams swap ends: flip Z of formation for everyone. */
@@ -158,6 +170,9 @@ let keyQPressed = false;
 /** User shot charge 0–1 while holding E with the ball */
 let shotChargePct = 0;
 let shotCharging = false;
+
+/** @type {'BROADCAST' | 'PLAYER_CAM' | 'TACTICAL'} */
+let cameraMode = 'BROADCAST';
 
 const cameraTargetPos = new THREE.Vector3();
 const cameraLookTarget = new THREE.Vector3();
@@ -191,6 +206,16 @@ let elGoalTeamName;
 let minimapCanvas;
 let minimapCtx;
 let elShotBar;
+let elFtTeamHome;
+let elFtTeamAway;
+let elFtPossH;
+let elFtPossA;
+let elFtShotsH;
+let elFtShotsA;
+let elFtSotH;
+let elFtSotA;
+let elFtPassH;
+let elFtPassA;
 
 // =============================================================================
 // PLAYER CLASS
@@ -845,6 +870,7 @@ function checkBallControl() {
     ballOwner = best;
     best.hasBall = true;
     ballVelocity.set(0, 0, 0);
+    touches[best.teamIndex] += 1;
   }
 }
 
@@ -966,6 +992,7 @@ function performPass(player) {
   dir.normalize();
   dir = applyAccuracy(dir, PLAYER_CONFIG.passAccuracy);
   const power = GAME_CONFIG.kickBasePower * GAME_CONFIG.passPowerMul;
+  passesCompleted[player.teamIndex] += 1;
   releaseBallFromOwner();
   player.hasBall = false;
   ballVelocity.copy(dir.multiplyScalar(power));
@@ -988,6 +1015,7 @@ function performShoot(player, charge01 = 1) {
   dir = applyAccuracy(dir, PLAYER_CONFIG.shotAccuracy);
   const c = THREE.MathUtils.clamp(charge01, 0, 1);
   const power = GAME_CONFIG.kickBasePower * (0.4 + c * 0.6);
+  shots[player.teamIndex] += 1;
   releaseBallFromOwner();
   player.hasBall = false;
   ballVelocity.copy(dir.multiplyScalar(power));
@@ -1095,6 +1123,7 @@ function checkGoals() {
   if (p.z + r < GAME_CONFIG.goalLineZHome && p.z + r > GAME_CONFIG.goalLineZHome - 2) {
     if (Math.abs(p.x) <= gw && p.y < gh + r) {
       awayScore += 1;
+      shotsOnTarget[1] += 1;
       showGoal(TEAMS.away.name);
       resetAfterGoal();
     }
@@ -1102,6 +1131,7 @@ function checkGoals() {
   if (p.z - r > GAME_CONFIG.goalLineZAway && p.z - r < GAME_CONFIG.goalLineZAway + 2) {
     if (Math.abs(p.x) <= gw && p.y < gh + r) {
       homeScore += 1;
+      shotsOnTarget[0] += 1;
       showGoal(TEAMS.home.name);
       resetAfterGoal();
     }
@@ -1250,6 +1280,15 @@ function aiGoalkeeperBehavior(p, deltaTime) {
         saveDir.normalize();
         ballVelocity.addScaledVector(saveDir, PLAYER_CONFIG.gkSaveForce);
         gameBall.position.addScaledVector(saveDir, 0.15);
+        if (clock) {
+          const t = clock.getElapsedTime();
+          const def = p.teamIndex;
+          if (t - lastGkSaveStatAt[def] >= 0.35) {
+            lastGkSaveStatAt[def] = t;
+            const atk = def === 0 ? 1 : 0;
+            shotsOnTarget[atk] += 1;
+          }
+        }
       }
     }
   }
@@ -1403,6 +1442,11 @@ function setState(next) {
     shotChargePct = 0;
   }
 
+  if (next === GAME_STATE.MENU) {
+    cameraMode = 'BROADCAST';
+    if (cameraPersp) camera = cameraPersp;
+  }
+
   if (elLoadingScreen) elLoadingScreen.classList.toggle('hidden', next !== GAME_STATE.LOADING);
   if (elMainMenu) elMainMenu.classList.toggle('visible', next === GAME_STATE.MENU);
   if (elPauseMenu) elPauseMenu.classList.toggle('visible', next === GAME_STATE.PAUSED);
@@ -1426,8 +1470,24 @@ function setState(next) {
   }
 }
 
+function resetMatchStats() {
+  touches[0] = 0;
+  touches[1] = 0;
+  shots[0] = 0;
+  shots[1] = 0;
+  shotsOnTarget[0] = 0;
+  shotsOnTarget[1] = 0;
+  passesCompleted[0] = 0;
+  passesCompleted[1] = 0;
+  lastGkSaveStatAt[0] = 0;
+  lastGkSaveStatAt[1] = 0;
+}
+
 function startMatch() {
   playSound('whistle');
+  cameraMode = 'BROADCAST';
+  if (cameraPersp) camera = cameraPersp;
+  resetMatchStats();
   homeScore = 0;
   awayScore = 0;
   matchTimeSec = 0;
@@ -1444,23 +1504,100 @@ function startMatch() {
 // CAMERA
 // =============================================================================
 
+function updateTacticalOrthoFrustum() {
+  if (!cameraOrtho) return;
+  const w = window.innerWidth;
+  const h = Math.max(1, window.innerHeight);
+  const aspect = w / h;
+  const margin = 6;
+  const hx = PITCH_CONFIG.halfLength + margin;
+  const hz = PITCH_CONFIG.halfWidth + margin;
+  let left;
+  let right;
+  let top;
+  let bottom;
+  if (aspect >= hx / hz) {
+    const halfZ = hz;
+    const halfX = halfZ * aspect;
+    left = -halfX;
+    right = halfX;
+    top = halfZ;
+    bottom = -halfZ;
+  } else {
+    const halfX = hx;
+    const halfZ = halfX / aspect;
+    left = -halfX;
+    right = halfX;
+    top = halfZ;
+    bottom = -halfZ;
+  }
+  cameraOrtho.left = left;
+  cameraOrtho.right = right;
+  cameraOrtho.top = top;
+  cameraOrtho.bottom = bottom;
+  cameraOrtho.updateProjectionMatrix();
+}
+
 function updateCamera(deltaTime) {
-  if (!controlledPlayer || !camera) return;
+  if (!camera) return;
+
+  if (cameraMode === 'TACTICAL') {
+    if (!cameraOrtho || camera !== cameraOrtho) return;
+    camera.position.set(0, 90, 0);
+    camera.up.set(0, 0, -1);
+    camera.lookAt(0, 0, 0);
+    return;
+  }
+
+  if (!cameraPersp || camera !== cameraPersp) return;
+  if (!controlledPlayer) return;
+
+  const lerp = GAME_CONFIG.cameraLerp;
   const p = controlledPlayer.position;
-  const ang = THREE.MathUtils.degToRad(GAME_CONFIG.cameraAngleDeg);
-  const back = GAME_CONFIG.cameraDistance * Math.cos(ang);
-  const up = GAME_CONFIG.cameraHeight + GAME_CONFIG.cameraDistance * Math.sin(ang);
-  const fx = Math.sin(controlledPlayer.rotation);
-  const fz = Math.cos(controlledPlayer.rotation);
-  const cx = p.x - fx * back;
-  const cz = p.z - fz * back;
-  const cy = p.y + up;
 
-  cameraTargetPos.set(cx, cy, cz);
-  camera.position.lerp(cameraTargetPos, GAME_CONFIG.cameraLerp);
+  if (cameraMode === 'BROADCAST') {
+    const focal = gameBall ? gameBall.position : p;
+    let fx = 0;
+    let fz = 1;
+    const bvx = ballVelocity.x;
+    const bvz = ballVelocity.z;
+    const bs = bvx * bvx + bvz * bvz;
+    if (gameBall && bs > 0.08) {
+      const inv = 1 / Math.sqrt(bs);
+      fx = bvx * inv;
+      fz = bvz * inv;
+    } else {
+      fx = Math.sin(controlledPlayer.rotation);
+      fz = Math.cos(controlledPlayer.rotation);
+    }
+    const ang = THREE.MathUtils.degToRad(GAME_CONFIG.cameraAngleDeg);
+    const back = GAME_CONFIG.cameraDistance * Math.cos(ang);
+    const up = GAME_CONFIG.cameraHeight + GAME_CONFIG.cameraDistance * Math.sin(ang);
+    const cx = focal.x - fx * back;
+    const cz = focal.z - fz * back;
+    const cy = focal.y + up;
 
-  cameraLookTarget.copy(p).add(new THREE.Vector3(0, 1.2, 0));
-  camera.lookAt(cameraLookTarget);
+    cameraTargetPos.set(cx, cy, cz);
+    camera.position.lerp(cameraTargetPos, lerp);
+    cameraLookTarget.copy(focal).add(new THREE.Vector3(0, 1.2, 0));
+    camera.lookAt(cameraLookTarget);
+    return;
+  }
+
+  if (cameraMode === 'PLAYER_CAM') {
+    const fx = Math.sin(controlledPlayer.rotation);
+    const fz = Math.cos(controlledPlayer.rotation);
+    const back = 15;
+    const up = 8;
+    const cx = p.x - fx * back;
+    const cz = p.z - fz * back;
+    const cy = p.y + up;
+
+    cameraTargetPos.set(cx, cy, cz);
+    camera.position.lerp(cameraTargetPos, lerp);
+    cameraLookTarget.copy(p).add(new THREE.Vector3(0, 1.2, 0));
+    camera.lookAt(cameraLookTarget);
+  }
 }
 
 // =============================================================================
@@ -1495,6 +1632,29 @@ function updateSelectionIndicator() {
 // UI
 // =============================================================================
 
+function updateFulltimeStatsPanel() {
+  if (!elFtPossH || !elFtPossA) return;
+  if (elFtTeamHome) elFtTeamHome.textContent = TEAMS.home.name;
+  if (elFtTeamAway) elFtTeamAway.textContent = TEAMS.away.name;
+
+  const totTouches = touches[0] + touches[1];
+  let possH = 50;
+  let possA = 50;
+  if (totTouches > 0) {
+    possH = Math.round((touches[0] / totTouches) * 100);
+    possA = 100 - possH;
+  }
+  elFtPossH.textContent = `${possH}%`;
+  elFtPossA.textContent = `${possA}%`;
+
+  if (elFtShotsH) elFtShotsH.textContent = String(shots[0]);
+  if (elFtShotsA) elFtShotsA.textContent = String(shots[1]);
+  if (elFtSotH) elFtSotH.textContent = String(shotsOnTarget[0]);
+  if (elFtSotA) elFtSotA.textContent = String(shotsOnTarget[1]);
+  if (elFtPassH) elFtPassH.textContent = String(passesCompleted[0]);
+  if (elFtPassA) elFtPassA.textContent = String(passesCompleted[1]);
+}
+
 function updateUI(deltaTime) {
   if (elScoreboard) {
     elScoreboard.textContent = `${TEAMS.home.name} ${homeScore} - ${awayScore} ${TEAMS.away.name}`;
@@ -1522,6 +1682,10 @@ function updateUI(deltaTime) {
   if (goalPopupTimer > 0) {
     goalPopupTimer -= deltaTime;
     if (goalPopupTimer <= 0 && elGoalPopup) elGoalPopup.classList.remove('show');
+  }
+
+  if (gameState === GAME_STATE.FULLTIME) {
+    updateFulltimeStatsPanel();
   }
 
   drawMinimap();
@@ -1585,6 +1749,22 @@ function setupUIListeners() {
       }
     }
     if (e.code === 'KeyQ') keyQPressed = true;
+    if (e.code === 'KeyC') {
+      if (
+        gameState === GAME_STATE.PLAYING ||
+        gameState === GAME_STATE.PAUSED
+      ) {
+        const order = ['BROADCAST', 'PLAYER_CAM', 'TACTICAL'];
+        const i = order.indexOf(cameraMode);
+        cameraMode = order[(i + 1) % order.length];
+        if (cameraMode === 'TACTICAL') {
+          camera = cameraOrtho;
+          updateTacticalOrthoFrustum();
+        } else {
+          camera = cameraPersp;
+        }
+      }
+    }
     if (e.code === 'Escape') {
       e.preventDefault();
       if (gameState === GAME_STATE.PLAYING) setState(GAME_STATE.PAUSED);
@@ -1650,13 +1830,30 @@ function cacheDom() {
   minimapCanvas = document.getElementById('minimap-canvas');
   minimapCtx = minimapCanvas?.getContext('2d') || null;
   elShotBar = document.getElementById('shot-bar');
+  elFtTeamHome = document.getElementById('ft-team-home');
+  elFtTeamAway = document.getElementById('ft-team-away');
+  elFtPossH = document.getElementById('ft-poss-h');
+  elFtPossA = document.getElementById('ft-poss-a');
+  elFtShotsH = document.getElementById('ft-shots-h');
+  elFtShotsA = document.getElementById('ft-shots-a');
+  elFtSotH = document.getElementById('ft-sot-h');
+  elFtSotA = document.getElementById('ft-sot-a');
+  elFtPassH = document.getElementById('ft-pass-h');
+  elFtPassA = document.getElementById('ft-pass-a');
 }
 
 function onResize() {
-  if (!camera || !renderer) return;
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  if (!renderer) return;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  if (cameraPersp) {
+    cameraPersp.aspect = w / Math.max(1, h);
+    cameraPersp.updateProjectionMatrix();
+  }
+  if (cameraOrtho) {
+    updateTacticalOrthoFrustum();
+  }
+  renderer.setSize(w, h);
 }
 
 // =============================================================================
@@ -1706,6 +1903,7 @@ function animate() {
     updateSelectionIndicator();
     updateUI(deltaTime);
   } else if (gameState === GAME_STATE.PAUSED) {
+    updateCamera(deltaTime);
     updateUI(deltaTime);
   } else if (gameState === GAME_STATE.HALFTIME || gameState === GAME_STATE.FULLTIME) {
     updateUI(deltaTime);
@@ -1726,8 +1924,16 @@ async function initGame() {
 
   clock = new THREE.Clock();
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 500);
-  camera.position.set(0, 40, 60);
+
+  const aspect = window.innerWidth / Math.max(1, window.innerHeight);
+  cameraPersp = new THREE.PerspectiveCamera(55, aspect, 0.1, 500);
+  cameraPersp.position.set(0, 40, 60);
+
+  cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+  updateTacticalOrthoFrustum();
+
+  cameraMode = 'BROADCAST';
+  camera = cameraPersp;
 
   renderer = setupRenderer(canvas);
   window.addEventListener('resize', onResize);
