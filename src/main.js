@@ -216,6 +216,61 @@ const PLAYER_RATINGS = {
     { pace: 0.92, shooting: 0.88, passing: 0.78, defending: 0.46 },
     { pace: 0.91, shooting: 0.86, passing: 0.8, defending: 0.44 },
   ],
+  bayern: [
+    { pace: 0.65, shooting: 0.32, passing: 0.72, defending: 0.88 },
+    { pace: 0.78, shooting: 0.45, passing: 0.72, defending: 0.88 },
+    { pace: 0.8, shooting: 0.42, passing: 0.74, defending: 0.87 },
+    { pace: 0.79, shooting: 0.44, passing: 0.73, defending: 0.86 },
+    { pace: 0.83, shooting: 0.41, passing: 0.71, defending: 0.85 },
+    { pace: 0.87, shooting: 0.65, passing: 0.88, defending: 0.62 },
+    { pace: 0.84, shooting: 0.68, passing: 0.86, defending: 0.6 },
+    { pace: 0.88, shooting: 0.62, passing: 0.9, defending: 0.63 },
+    { pace: 0.93, shooting: 0.91, passing: 0.82, defending: 0.44 },
+    { pace: 0.91, shooting: 0.89, passing: 0.84, defending: 0.46 },
+    { pace: 0.96, shooting: 0.93, passing: 0.8, defending: 0.42 },
+  ],
+  /** Fast wide players and lethal forwards */
+  psg: [
+    { pace: 0.64, shooting: 0.31, passing: 0.7, defending: 0.84 },
+    { pace: 0.82, shooting: 0.43, passing: 0.73, defending: 0.82 },
+    { pace: 0.81, shooting: 0.41, passing: 0.75, defending: 0.83 },
+    { pace: 0.8, shooting: 0.42, passing: 0.74, defending: 0.84 },
+    { pace: 0.85, shooting: 0.4, passing: 0.72, defending: 0.81 },
+    { pace: 0.9, shooting: 0.66, passing: 0.87, defending: 0.58 },
+    { pace: 0.88, shooting: 0.64, passing: 0.89, defending: 0.56 },
+    { pace: 0.91, shooting: 0.7, passing: 0.88, defending: 0.55 },
+    { pace: 0.96, shooting: 0.92, passing: 0.83, defending: 0.4 },
+    { pace: 0.94, shooting: 0.9, passing: 0.81, defending: 0.42 },
+    { pace: 0.97, shooting: 0.94, passing: 0.84, defending: 0.38 },
+  ],
+  /** Compact back line, strong duels */
+  juventus: [
+    { pace: 0.61, shooting: 0.29, passing: 0.68, defending: 0.9 },
+    { pace: 0.76, shooting: 0.4, passing: 0.7, defending: 0.9 },
+    { pace: 0.78, shooting: 0.38, passing: 0.72, defending: 0.89 },
+    { pace: 0.77, shooting: 0.39, passing: 0.71, defending: 0.9 },
+    { pace: 0.8, shooting: 0.37, passing: 0.69, defending: 0.88 },
+    { pace: 0.82, shooting: 0.52, passing: 0.84, defending: 0.72 },
+    { pace: 0.8, shooting: 0.5, passing: 0.83, defending: 0.74 },
+    { pace: 0.84, shooting: 0.55, passing: 0.85, defending: 0.7 },
+    { pace: 0.88, shooting: 0.78, passing: 0.76, defending: 0.52 },
+    { pace: 0.86, shooting: 0.76, passing: 0.78, defending: 0.54 },
+    { pace: 0.89, shooting: 0.8, passing: 0.75, defending: 0.5 },
+  ],
+  /** Even spread — press and transition */
+  chelsea: [
+    { pace: 0.63, shooting: 0.31, passing: 0.71, defending: 0.85 },
+    { pace: 0.79, shooting: 0.44, passing: 0.74, defending: 0.84 },
+    { pace: 0.78, shooting: 0.42, passing: 0.75, defending: 0.85 },
+    { pace: 0.77, shooting: 0.43, passing: 0.73, defending: 0.84 },
+    { pace: 0.81, shooting: 0.41, passing: 0.72, defending: 0.83 },
+    { pace: 0.85, shooting: 0.6, passing: 0.86, defending: 0.64 },
+    { pace: 0.83, shooting: 0.58, passing: 0.87, defending: 0.65 },
+    { pace: 0.86, shooting: 0.62, passing: 0.85, defending: 0.62 },
+    { pace: 0.9, shooting: 0.82, passing: 0.8, defending: 0.48 },
+    { pace: 0.88, shooting: 0.8, passing: 0.82, defending: 0.5 },
+    { pace: 0.89, shooting: 0.84, passing: 0.79, defending: 0.47 },
+  ],
 };
 
 function getPlayerRating(teamIndex, slotIndex) {
@@ -226,6 +281,35 @@ function getPlayerRating(teamIndex, slotIndex) {
     return DEFAULT_PLAYER_RATING;
   }
   return table[slotIndex];
+}
+
+function averageTeamRatings(presetId) {
+  const table = PLAYER_RATINGS[presetId];
+  if (!table || table.length === 0) {
+    return {
+      pace: DEFAULT_PLAYER_RATING.pace,
+      shooting: DEFAULT_PLAYER_RATING.shooting,
+      passing: DEFAULT_PLAYER_RATING.passing,
+      defending: DEFAULT_PLAYER_RATING.defending,
+    };
+  }
+  let pac = 0;
+  let sho = 0;
+  let pas = 0;
+  let def = 0;
+  for (const r of table) {
+    pac += r.pace;
+    sho += r.shooting;
+    pas += r.passing;
+    def += r.defending;
+  }
+  const n = table.length;
+  return {
+    pace: pac / n,
+    shooting: sho / n,
+    passing: pas / n,
+    defending: def / n,
+  };
 }
 
 const TEAMS = {
@@ -375,6 +459,9 @@ const penaltyAttempts = [0, 0];
 let penaltyResults = [[], []];
 let penaltyIntroTimer = 0;
 let penaltyAwaitingKick = false;
+/** Penalty aim before kick: X ∈ [-1,1] (left–right), Y ∈ [0,1] (low–high). */
+let penaltyAimX = 0;
+let penaltyAimY = 0;
 let penaltyRunTimer = 0;
 let penaltyResolveTimer = 0;
 let penaltySavedTimer = 0;
@@ -445,6 +532,68 @@ let crowdMurmurBuildPromise = null;
 
 let nearMissCooldown = 0;
 
+/** 1.0 fresh → ~0.78 by full time; scaled in Player.move */
+let matchFatigueFactor = 1.0;
+
+/** Commentary ticker: current minimum priority that may interrupt (-1 = none). */
+let commentaryPriorityShowing = -1;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let commentaryHideTimer = null;
+let commentaryUserFirstTouchDone = false;
+
+const GOAL_COMMENTARY_PHRASES = [
+  (name) => `GOOOAL! ${name} take the lead!`,
+  (name) => `What a strike! ${name} hit the net!`,
+  (name) => `The crowd erupts — ${name} score!`,
+  (name) => `Back of the net! ${name} are on the board!`,
+  (name) => `Clinical finish! ${name} make it count!`,
+];
+
+function showCommentary(text, priority = 0) {
+  if (priority < commentaryPriorityShowing) return;
+  commentaryPriorityShowing = priority;
+  if (elCommentaryText) elCommentaryText.textContent = text;
+  if (elCommentaryBar) elCommentaryBar.classList.add('visible');
+  if (commentaryHideTimer) clearTimeout(commentaryHideTimer);
+  commentaryHideTimer = setTimeout(() => {
+    if (elCommentaryBar) elCommentaryBar.classList.remove('visible');
+    commentaryPriorityShowing = -1;
+    commentaryHideTimer = null;
+  }, 4000);
+}
+
+function updateCustomMatchTeamRatingCard() {
+  const homeSel = document.getElementById('select-team-home');
+  const awaySel = document.getElementById('select-team-away');
+  const rpac = document.getElementById('r-pac');
+  const rsho = document.getElementById('r-sho');
+  const rpas = document.getElementById('r-pas');
+  const rdef = document.getElementById('r-def');
+  if (!homeSel || !awaySel || !rpac || !rsho || !rpas || !rdef) return;
+  const h = averageTeamRatings(homeSel.value);
+  const a = averageTeamRatings(awaySel.value);
+  const avg = {
+    pace: (h.pace + a.pace) / 2,
+    shooting: (h.shooting + a.shooting) / 2,
+    passing: (h.passing + a.passing) / 2,
+    defending: (h.defending + a.defending) / 2,
+  };
+  rpac.style.width = `${avg.pace * 100}%`;
+  rsho.style.width = `${avg.shooting * 100}%`;
+  rpas.style.width = `${avg.passing * 100}%`;
+  rdef.style.width = `${avg.defending * 100}%`;
+}
+
+/** Defenders frozen in a wall during user free kicks */
+let freeKickWallPlayers = [];
+
+/** Motion trail sprites for fast ball */
+const TRAIL_COUNT = 10;
+const trailSprites = [];
+const trailPositions = [];
+let trailHead = 0;
+let trailWasFast = false;
+
 const crowdLoop = {
   async start() {
     initAudio();
@@ -510,6 +659,8 @@ let elPenaltyHudLabelAway;
 let elPenaltyHudHome;
 let elPenaltyHudAway;
 let elPenaltySaved;
+let elPenaltyCrosshair;
+let elPenaltyCrosshairDot;
 let elFtTeamHome;
 let elFtTeamAway;
 let elFtPossH;
@@ -520,6 +671,10 @@ let elFtSotH;
 let elFtSotA;
 let elFtPassH;
 let elFtPassA;
+let elCommentaryBar;
+let elCommentaryText;
+let elStaminaWrap;
+let elStaminaLabel;
 
 // =============================================================================
 // PLAYER CLASS
@@ -690,7 +845,11 @@ class Player {
     this.rotation = Math.atan2(dir.x, dir.z);
     this.mesh.rotation.y = this.rotation;
 
-    let speed = this.maxSpeed;
+    const personalFatigue =
+      0.75 + (this.stamina / PLAYER_CONFIG.staminaMax) * 0.25;
+    const fatigueMul = matchFatigueFactor * personalFatigue;
+
+    let speed = this.maxSpeed * fatigueMul;
     if (walkOnly) {
       speed = PLAYER_CONFIG.walkSpeed;
       this.stamina = Math.min(
@@ -698,7 +857,7 @@ class Player {
         this.stamina + PLAYER_CONFIG.staminaRecover * deltaTime
       );
     } else if (isSprinting && this.stamina > 2) {
-      speed = this.sprintSpeed;
+      speed = this.sprintSpeed * fatigueMul;
       this.stamina = Math.max(0, this.stamina - PLAYER_CONFIG.sprintDrain * deltaTime);
     } else {
       this.stamina = Math.min(
@@ -1337,6 +1496,12 @@ function showCardPopup(player, kind) {
   elCardPopupNumber.textContent = String(player.slotIndex + 1);
   elCardPopup.classList.add('show');
   cardPopupTimer = 2.5;
+  if (kind === 'yellow') {
+    showCommentary(`Booking! ${player.slotIndex + 1} is cautioned.`, 2);
+  } else {
+    const tn = player.teamIndex === 0 ? TEAMS.home.name : TEAMS.away.name;
+    showCommentary(`Red card! ${tn} down to 10 men!`, 2);
+  }
 }
 
 function reassignControlledPlayerAfterSendoff(teamIndex) {
@@ -1374,6 +1539,41 @@ function sendOffPlayer(p) {
   if (controlledPlayer === p) reassignControlledPlayerAfterSendoff(team);
 }
 
+function buildFreeKickWall(foulSpot, attackingTeamIndex) {
+  const defendingTeam = attackingTeamIndex === 0 ? 1 : 0;
+  const gz = getAttackingGoalZ(attackingTeamIndex);
+  const dirToGoal = new THREE.Vector3(0, 0, gz).sub(foulSpot);
+  dirToGoal.y = 0;
+  if (dirToGoal.lengthSq() < 1e-8) {
+    dirToGoal.set(0, 0, Math.sign(gz) || 1);
+  } else {
+    dirToGoal.normalize();
+  }
+  const wallCenter = foulSpot.clone().addScaledVector(dirToGoal, 9.15);
+  const perp = new THREE.Vector3(-dirToGoal.z, 0, dirToGoal.x);
+  if (perp.lengthSq() > 1e-8) perp.normalize();
+
+  const defenders = players
+    .filter((p) => p.teamIndex === defendingTeam && p.role !== 'gk')
+    .sort(
+      (a, b) =>
+        a.position.distanceToSquared(foulSpot) -
+        b.position.distanceToSquared(foulSpot)
+    )
+    .slice(0, 3);
+
+  defenders.forEach((p, i) => {
+    const offset = (i - 1) * 0.85;
+    const wallPos = wallCenter.clone().addScaledVector(perp, offset);
+    wallPos.y = 0;
+    p.position.copy(wallPos);
+    p.velocity.set(0, 0, 0);
+    p.mesh.rotation.y = Math.atan2(-dirToGoal.x, -dirToGoal.z);
+    p.rotation = p.mesh.rotation.y;
+  });
+  freeKickWallPlayers = defenders;
+}
+
 function freekick(fouledPlayer) {
   if (!gameBall || !fouledPlayer) return;
   const r = GAME_CONFIG.ballRadius;
@@ -1409,6 +1609,7 @@ function freekick(fouledPlayer) {
     attachControlledLabelToPlayer(taker);
     ensureFreekickArrow();
     updateFreekickArrow();
+    buildFreeKickWall(new THREE.Vector3(bx, 0, bz), team);
     setState(GAME_STATE.FREEKICK);
     return;
   }
@@ -1562,25 +1763,27 @@ function updateBallPhysics(deltaTime) {
   const px = gameBall.position.x;
   const pz = gameBall.position.z;
 
-  if (Math.abs(px) > halfW - r) {
-    throwIn(px, pz);
-    updateBallShadow();
-    return;
-  }
-
-  if (pz > halfL - r) {
-    if (!isBallInGoalMouth(GAME_CONFIG.goalLineZAway, gameBall.position)) {
-      if (lastTouchTeam === 0) cornerKick(0);
-      else goalKick(1);
+  if (gameState !== GAME_STATE.PENALTY) {
+    if (Math.abs(px) > halfW - r) {
+      throwIn(px, pz);
       updateBallShadow();
       return;
     }
-  } else if (pz < -halfL + r) {
-    if (!isBallInGoalMouth(GAME_CONFIG.goalLineZHome, gameBall.position)) {
-      if (lastTouchTeam === 1) cornerKick(1);
-      else goalKick(0);
-      updateBallShadow();
-      return;
+
+    if (pz > halfL - r) {
+      if (!isBallInGoalMouth(GAME_CONFIG.goalLineZAway, gameBall.position)) {
+        if (lastTouchTeam === 0) cornerKick(0);
+        else goalKick(1);
+        updateBallShadow();
+        return;
+      }
+    } else if (pz < -halfL + r) {
+      if (!isBallInGoalMouth(GAME_CONFIG.goalLineZHome, gameBall.position)) {
+        if (lastTouchTeam === 1) cornerKick(1);
+        else goalKick(0);
+        updateBallShadow();
+        return;
+      }
     }
   }
 
@@ -1621,6 +1824,64 @@ function updateBallShadow() {
   ballShadow.material.opacity = fade;
   const sc = 1 + h * 0.08;
   ballShadow.scale.set(sc, sc, sc);
+}
+
+function initBallTrail() {
+  if (!scene) return;
+  for (let i = 0; i < TRAIL_COUNT; i += 1) {
+    const mat = new THREE.SpriteMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(0.4, 0.4, 1);
+    scene.add(sprite);
+    trailSprites.push(sprite);
+    trailPositions.push(new THREE.Vector3());
+  }
+  trailHead = 0;
+  trailWasFast = false;
+}
+
+function updateBallTrail(deltaTime) {
+  if (!gameBall || trailSprites.length === 0) return;
+  const spd = ballVelocity.length();
+  if (ballOwner) {
+    trailWasFast = false;
+    trailSprites.forEach((s) => {
+      s.material.opacity *= 0.8;
+    });
+    return;
+  }
+  if (spd > 8) {
+    if (!trailWasFast) {
+      trailWasFast = true;
+      for (let j = 0; j < TRAIL_COUNT; j += 1) {
+        trailPositions[j].copy(gameBall.position);
+      }
+      trailHead = 0;
+    }
+    trailPositions[trailHead].copy(gameBall.position);
+    trailHead = (trailHead + 1) % TRAIL_COUNT;
+    const col = spd > 18 ? 0xff6600 : 0xffffff;
+    for (let i = 0; i < TRAIL_COUNT; i += 1) {
+      const idx = (trailHead - 1 - i + TRAIL_COUNT) % TRAIL_COUNT;
+      const age = i / TRAIL_COUNT;
+      const sprite = trailSprites[i];
+      sprite.position.copy(trailPositions[idx]);
+      sprite.material.opacity = Math.max(0, 0.45 - age * 0.45);
+      const s = 0.5 - age * 0.3;
+      sprite.scale.set(s, s, 1);
+      sprite.material.color.setHex(col);
+    }
+  } else {
+    trailWasFast = false;
+    trailSprites.forEach((s) => {
+      s.material.opacity *= 0.8;
+    });
+  }
 }
 
 function releaseBallFromOwner() {
@@ -1666,6 +1927,17 @@ function checkBallControl() {
     ballVelocity.set(0, 0, 0);
     touches[best.teamIndex] += 1;
     lastTouchTeam = best.teamIndex;
+    if (
+      !commentaryUserFirstTouchDone &&
+      best.teamIndex === GAME_CONFIG.userTeamIndex
+    ) {
+      commentaryUserFirstTouchDone = true;
+      const tn =
+        GAME_CONFIG.userTeamIndex === 0
+          ? TEAMS.home.name
+          : TEAMS.away.name;
+      showCommentary(`${tn} with early possession.`, 0);
+    }
   }
 }
 
@@ -1919,6 +2191,7 @@ function resetBallToPasser(passer) {
 function showOffside() {
   offsidePopupTimer = 2;
   if (elOffsidePopup) elOffsidePopup.classList.add('show');
+  showCommentary('Offside flag raised — play stops.', 1);
 }
 
 function performPass(player) {
@@ -2063,6 +2336,8 @@ function performTackle(player) {
     Math.random() < 0.4 * (1 - best.tackleStrength)
   ) {
     applyTackleFoul(player, best);
+  } else if (hadBallBefore && player.isUserControlled) {
+    showCommentary('Great tackle! Ball won back.', 0);
   }
 }
 
@@ -2098,6 +2373,13 @@ function showGoal(teamName, options) {
   if (elGoalPopup && elGoalTeamName) {
     elGoalTeamName.textContent = teamName;
     elGoalPopup.classList.add('show');
+  }
+  if (!options?.penaltyOnly) {
+    const line =
+      GOAL_COMMENTARY_PHRASES[
+        Math.floor(Math.random() * GOAL_COMMENTARY_PHRASES.length)
+      ](teamName);
+    showCommentary(line, 2);
   }
   if (options?.penaltyOnly) return;
   if (gameBall) goalReplayPos.copy(gameBall.position);
@@ -2207,7 +2489,32 @@ function tryFinishPenaltyShootout() {
 
 function penaltyShoot() {
   const t = penaltyTeam;
-  const scored = Math.random() < 0.72;
+  const halfGoal = GAME_CONFIG.goalWidth * 0.5;
+  const aimedX = penaltyAimX * halfGoal * 1.1;
+  const aimedY = GAME_CONFIG.goalHeight * (0.15 + penaltyAimY * 0.8);
+  const gz = getAttackingGoalZ(t);
+  const gkReach = 0.35 + Math.random() * 0.25;
+  const normalizedX = Math.abs(penaltyAimX);
+  const scored =
+    normalizedX > gkReach ||
+    (penaltyAimY > 0.7 && Math.random() < 0.65);
+
+  if (gameBall && penaltyStriker) {
+    gameBall.position.set(
+      penaltyStriker.position.x,
+      GAME_CONFIG.ballRadius,
+      penaltyStriker.position.z
+    );
+  }
+  releaseBallFromOwner();
+  if (penaltyStriker) penaltyStriker.hasBall = false;
+  ballVelocity.set(aimedX * 3, aimedY * 6, Math.sign(gz || 1) * 22);
+  lastTouchTeam = t;
+  playSound('kick');
+
+  penaltyAimX = 0;
+  penaltyAimY = 0;
+
   if (scored) {
     penaltyScores[t] += 1;
     penaltyResults[t].push('s');
@@ -2256,6 +2563,8 @@ function startPenaltyShootout() {
   penaltyAttempts[0] = 0;
   penaltyAttempts[1] = 0;
   penaltyResults = [[], []];
+  penaltyAimX = 0;
+  penaltyAimY = 0;
   penaltyIntroTimer = 2;
   penaltyAwaitingKick = false;
   penaltyRunTimer = 0;
@@ -2357,6 +2666,7 @@ function checkNearMissShots(deltaTime) {
       postShake.group = homeGoalGroup;
       postShake.timer = 0.35;
       postShake.intensity = 0.08;
+      showCommentary('So close! Just wide of the post.', 1);
       return;
     }
   }
@@ -2370,6 +2680,7 @@ function checkNearMissShots(deltaTime) {
       postShake.group = awayGoalGroup;
       postShake.timer = 0.35;
       postShake.intensity = 0.08;
+      showCommentary('So close! Just wide of the post.', 1);
     }
   }
 }
@@ -2389,6 +2700,7 @@ function pickCelebrationRunners(scorer) {
 
 function checkGoals() {
   if (!gameBall || ballOwner) return;
+  if (gameState === GAME_STATE.PENALTY) return;
   const gw = GAME_CONFIG.goalWidth * 0.5;
   const gh = GAME_CONFIG.goalHeight;
   const p = gameBall.position;
@@ -2631,6 +2943,7 @@ function aiGoalkeeperBehavior(p, deltaTime) {
         lastGkSaveStatAt[def] = t;
         const atk = def === 0 ? 1 : 0;
         shotsOnTarget[atk] += 1;
+        showCommentary('Brilliant save by the keeper!', 1);
       }
     }
     return;
@@ -2896,6 +3209,12 @@ function updateAI(deltaTime) {
 
   for (const p of players) {
     if (p.isUserControlled) continue;
+    if (
+      gameState === GAME_STATE.FREEKICK &&
+      freeKickWallPlayers.includes(p)
+    ) {
+      continue;
+    }
     if (p.role === 'gk') aiGoalkeeperBehavior(p, deltaTime);
     else aiFieldPlayerBehavior(p, deltaTime);
   }
@@ -2914,6 +3233,8 @@ function formatTime(sec) {
 function updateMatchTime(deltaTime) {
   if (gameState !== GAME_STATE.PLAYING) return;
   matchTimeSec += deltaTime;
+  matchFatigueFactor =
+    1.0 - (matchTimeSec / GAME_CONFIG.fullDurationSec) * 0.22;
   if (matchTimeSec >= GAME_CONFIG.halfDurationSec && currentHalf === 1) {
     setState(GAME_STATE.HALFTIME);
     return;
@@ -2930,10 +3251,13 @@ function updateMatchTime(deltaTime) {
 function beginSecondHalf() {
   currentHalf = 2;
   sidesSwapped = true;
+  const staminaBefore = players.map((p) => p.stamina);
   resetPlayersToFormation();
-  players.forEach((p) => {
-    p.formationWorld.copy(computeFormationWorld(p.teamIndex, p.slotIndex));
+  players.forEach((p, i) => {
+    const prev = staminaBefore[i] ?? p.stamina;
+    p.stamina = Math.min(PLAYER_CONFIG.staminaMax, prev + 35);
   });
+  matchFatigueFactor = Math.min(1.0, matchFatigueFactor + 0.08);
 }
 
 function setState(next) {
@@ -2962,9 +3286,14 @@ function setState(next) {
 
   if (prev === GAME_STATE.FREEKICK && next !== GAME_STATE.FREEKICK) {
     removeFkArrow();
+    freeKickWallPlayers = [];
     if (next !== GAME_STATE.PLAYING) {
       freekickData.shooter = null;
     }
+  }
+
+  if (next !== GAME_STATE.PENALTY && elPenaltyCrosshair) {
+    elPenaltyCrosshair.classList.remove('visible');
   }
 
   if (next === GAME_STATE.MENU) {
@@ -3005,6 +3334,12 @@ function setState(next) {
 
   if (next === GAME_STATE.HALFTIME && elHalftimeScore) {
     elHalftimeScore.textContent = `${homeScore} - ${awayScore}`;
+  }
+  if (next === GAME_STATE.HALFTIME) {
+    showCommentary(
+      'Half time whistle! The referee brings the first half to a close.',
+      1
+    );
   }
   if (next === GAME_STATE.FULLTIME) {
     if (elFulltimeScore) elFulltimeScore.textContent = `${homeScore} - ${awayScore}`;
@@ -3048,6 +3383,8 @@ function startMatch() {
   homeScore = 0;
   awayScore = 0;
   matchTimeSec = 0;
+  matchFatigueFactor = 1.0;
+  commentaryUserFirstTouchDone = false;
   currentHalf = 1;
   sidesSwapped = false;
   lastFulltimePenaltyWinner = null;
@@ -3061,6 +3398,7 @@ function startMatch() {
   setupTeams();
   resetPlayersToFormation();
   setState(GAME_STATE.PLAYING);
+  showCommentary('Kickoff! The match is underway.', 0);
   void crowdLoop.start();
 }
 
@@ -3341,9 +3679,37 @@ function updateUI(deltaTime) {
     elFreekickHint.classList.toggle('visible', gameState === GAME_STATE.FREEKICK);
   }
 
+  if (elPenaltyCrosshair && elPenaltyCrosshairDot) {
+    const showCrosshair =
+      gameState === GAME_STATE.PENALTY &&
+      penaltyAwaitingKick &&
+      penaltyIntroTimer <= 0 &&
+      penaltyResolveTimer <= 0 &&
+      penaltyRunTimer <= 0;
+    elPenaltyCrosshair.classList.toggle('visible', showCrosshair);
+    if (showCrosshair) {
+      elPenaltyCrosshairDot.style.left = `${90 + penaltyAimX * 80}px`;
+      elPenaltyCrosshairDot.style.bottom = `${6 + penaltyAimY * 76}px`;
+    }
+  }
+
   if (controlledPlayer && elStaminaFill) {
     const pct = controlledPlayer.stamina / PLAYER_CONFIG.staminaMax;
     elStaminaFill.style.transform = `scaleX(${Math.max(0.05, pct)})`;
+  }
+
+  const fatigueHud =
+    gameState === GAME_STATE.PLAYING ||
+    gameState === GAME_STATE.PAUSED ||
+    gameState === GAME_STATE.FREEKICK ||
+    gameState === GAME_STATE.GOAL_REPLAY;
+  if (elStaminaWrap) {
+    const tired = fatigueHud && matchFatigueFactor < 0.88;
+    elStaminaWrap.classList.toggle('fatigued', tired);
+  }
+  if (elStaminaLabel) {
+    const tired = fatigueHud && matchFatigueFactor < 0.88;
+    elStaminaLabel.textContent = tired ? 'Tired' : 'Stamina';
   }
 
   if (elShotBar) {
@@ -3718,6 +4084,19 @@ function setupUIListeners() {
       e.preventDefault();
     }
     if (
+      gameState === GAME_STATE.PENALTY &&
+      penaltyAwaitingKick &&
+      penaltyIntroTimer <= 0 &&
+      penaltyResolveTimer <= 0 &&
+      penaltyRunTimer <= 0 &&
+      (e.code === 'ArrowLeft' ||
+        e.code === 'ArrowRight' ||
+        e.code === 'ArrowUp' ||
+        e.code === 'ArrowDown')
+    ) {
+      e.preventDefault();
+    }
+    if (
       gameState === GAME_STATE.FREEKICK &&
       (e.code === 'ArrowLeft' ||
         e.code === 'ArrowRight' ||
@@ -3727,6 +4106,14 @@ function setupUIListeners() {
       e.preventDefault();
     }
   });
+
+  document
+    .getElementById('select-team-home')
+    ?.addEventListener('change', updateCustomMatchTeamRatingCard);
+  document
+    .getElementById('select-team-away')
+    ?.addEventListener('change', updateCustomMatchTeamRatingCard);
+  updateCustomMatchTeamRatingCard();
 }
 
 function cacheDom() {
@@ -3761,6 +4148,8 @@ function cacheDom() {
   elPenaltyHudHome = document.getElementById('penalty-hud-home');
   elPenaltyHudAway = document.getElementById('penalty-hud-away');
   elPenaltySaved = document.getElementById('penalty-saved');
+  elPenaltyCrosshair = document.getElementById('penalty-crosshair');
+  elPenaltyCrosshairDot = document.getElementById('penalty-crosshair-dot');
   elFtTeamHome = document.getElementById('ft-team-home');
   elFtTeamAway = document.getElementById('ft-team-away');
   elFtPossH = document.getElementById('ft-poss-h');
@@ -3771,6 +4160,10 @@ function cacheDom() {
   elFtSotA = document.getElementById('ft-sot-a');
   elFtPassH = document.getElementById('ft-pass-h');
   elFtPassA = document.getElementById('ft-pass-a');
+  elCommentaryBar = document.getElementById('commentary-bar');
+  elCommentaryText = document.getElementById('commentary-text');
+  elStaminaWrap = document.getElementById('stamina-wrap');
+  elStaminaLabel = document.getElementById('stamina-label');
 }
 
 function onResize() {
@@ -3911,6 +4304,25 @@ function animate() {
       }
     }
     if (
+      penaltyAwaitingKick &&
+      penaltyIntroTimer <= 0 &&
+      penaltyResolveTimer <= 0 &&
+      penaltyRunTimer <= 0
+    ) {
+      if (keys.ArrowLeft) {
+        penaltyAimX = Math.max(-1, penaltyAimX - 1.5 * deltaTime);
+      }
+      if (keys.ArrowRight) {
+        penaltyAimX = Math.min(1, penaltyAimX + 1.5 * deltaTime);
+      }
+      if (keys.ArrowUp) {
+        penaltyAimY = Math.min(1, penaltyAimY + 1.2 * deltaTime);
+      }
+      if (keys.ArrowDown) {
+        penaltyAimY = Math.max(0, penaltyAimY - 1.2 * deltaTime);
+      }
+    }
+    if (
       keySpacePressed &&
       penaltyAwaitingKick &&
       penaltyIntroTimer <= 0 &&
@@ -3950,6 +4362,9 @@ function animate() {
         penaltyRunTimer = 0;
         penaltyShoot();
       }
+    }
+    if (penaltyRunTimer <= 0) {
+      updateBallPhysics(deltaTime);
     }
     updateCamera(deltaTime);
     updateUI(deltaTime);
@@ -3995,6 +4410,8 @@ function animate() {
     }
   }
 
+  updateBallTrail(deltaTime);
+
   if (renderer && scene && camera) renderer.render(scene, camera);
 }
 
@@ -4031,6 +4448,7 @@ async function initGame() {
   createGoal(1);
   gameBall = createBall();
   ballShadow = createBallShadow();
+  initBallTrail();
   setupTeams();
   createSelectionIndicator();
   applyActiveDifficulty();

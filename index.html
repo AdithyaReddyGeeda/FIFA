@@ -126,6 +126,51 @@
       gap: 10px;
       margin-top: 0.5rem;
     }
+    #team-rating-card {
+      margin-top: 0.75rem;
+      padding: 10px 12px;
+      background: rgba(0,0,0,0.38);
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    #team-rating-card .rating-card-title {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #94a3b8;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      text-align: center;
+    }
+    #team-rating-card .rating-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 5px 0;
+      font-size: 0.78rem;
+      color: #e2e8f0;
+    }
+    #team-rating-card .rating-row > span:first-child {
+      width: 34px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: #cbd5e1;
+    }
+    .rating-track {
+      flex: 1;
+      height: 10px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    #team-rating-card .rating-bar {
+      height: 100%;
+      width: 50%;
+      min-width: 0;
+      background: linear-gradient(90deg, #166534, #4ade80);
+      border-radius: 5px;
+      transition: width 0.25s ease-out;
+    }
     .difficulty-row {
       display: flex;
       flex-wrap: wrap;
@@ -348,6 +393,45 @@
       transform-origin: left center;
       transform: scaleX(1);
     }
+    #stamina-wrap.fatigued label {
+      color: #fecaca;
+    }
+    #stamina-wrap.fatigued #stamina-fill {
+      background: linear-gradient(90deg, #7f1d1d, #dc2626, #f87171);
+      animation: stamina-tired-pulse 1.8s ease-in-out infinite;
+    }
+    @keyframes stamina-tired-pulse {
+      0%, 100% { opacity: 0.82; filter: brightness(0.95); }
+      50% { opacity: 1; filter: brightness(1.08); }
+    }
+
+    #commentary-bar {
+      position: fixed;
+      left: 50%;
+      bottom: 96px;
+      transform: translateX(-50%);
+      max-width: min(560px, 92vw);
+      padding: 10px 18px;
+      background: rgba(0, 0, 0, 0.72);
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      opacity: 0;
+      pointer-events: none;
+      z-index: 14;
+      transition: opacity 0.4s ease;
+    }
+    #commentary-bar.visible {
+      opacity: 1;
+    }
+    #commentary-text {
+      display: block;
+      color: #fff;
+      font-style: italic;
+      font-size: 0.95rem;
+      line-height: 1.35;
+      text-align: center;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+    }
 
     #shot-wrap {
       position: absolute;
@@ -454,6 +538,34 @@
       font-weight: 500;
       color: #94a3b8;
       letter-spacing: 0.12em;
+    }
+
+    #penalty-crosshair {
+      display: none;
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 180px;
+      height: 100px;
+      box-sizing: border-box;
+      border: 2px solid rgba(74, 222, 128, 0.55);
+      background: rgba(34, 197, 94, 0.12);
+      border-radius: 6px;
+      pointer-events: none;
+      z-index: 92;
+    }
+    #penalty-crosshair.visible {
+      display: block;
+    }
+    #penalty-crosshair-dot {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background: #fff;
+      border-radius: 50%;
+      box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+      transform: translate(-50%, 50%);
     }
 
     #penalty-saved {
@@ -765,6 +877,13 @@
           <option value="chelsea" data-primary="#034694">Chelsea (#034694)</option>
         </select>
       </div>
+      <div id="team-rating-card">
+        <div class="rating-card-title">Squad profile (home + away avg)</div>
+        <div class="rating-row"><span>PAC</span><div class="rating-track"><div class="rating-bar" id="r-pac"></div></div></div>
+        <div class="rating-row"><span>SHO</span><div class="rating-track"><div class="rating-bar" id="r-sho"></div></div></div>
+        <div class="rating-row"><span>PAS</span><div class="rating-track"><div class="rating-bar" id="r-pas"></div></div></div>
+        <div class="rating-row"><span>DEF</span><div class="rating-track"><div class="rating-bar" id="r-def"></div></div></div>
+      </div>
       <div class="custom-actions">
         <button type="button" class="menu-btn primary" id="btn-kick-off-custom">Kick Off</button>
         <button type="button" class="menu-btn" id="btn-custom-back">Back</button>
@@ -839,7 +958,10 @@
         <span id="penalty-hud-label-away">Away</span>:
         <span id="penalty-hud-away"></span>
       </div>
-      <div class="penalty-hud-hint">SPACE — Shoot</div>
+      <div class="penalty-hud-hint">Arrows — Aim · SPACE — Run &amp; shoot</div>
+    </div>
+    <div id="penalty-crosshair" aria-hidden="true">
+      <div id="penalty-crosshair-dot"></div>
     </div>
     <div id="penalty-saved" aria-live="polite">
       <div class="penalty-saved-title">SAVED!</div>
@@ -849,7 +971,7 @@
       <div class="stamina-bar-bg"><div id="shot-bar"></div></div>
     </div>
     <div id="stamina-wrap">
-      <label>Stamina</label>
+      <label id="stamina-label">Stamina</label>
       <div class="stamina-bar-bg"><div id="stamina-fill"></div></div>
     </div>
     <div id="radar-wrap"><canvas id="minimap-canvas" width="150" height="150"></canvas></div>
@@ -874,6 +996,9 @@
     </div>
     <div id="card-popup" aria-live="polite">
       <span id="card-popup-number">0</span>
+    </div>
+    <div id="commentary-bar" aria-live="polite" aria-atomic="true">
+      <span id="commentary-text"></span>
     </div>
   </div>
 
