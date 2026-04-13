@@ -327,11 +327,13 @@
     }
     #shot-bar {
       height: 100%;
-      width: 0%;
+      width: 100%;
       border-radius: 7px;
       background: linear-gradient(90deg, #ca8a04, #f59e0b, #fb923c);
       box-shadow: 0 0 8px rgba(251, 146, 60, 0.35);
-      transition: width 0.04s linear;
+      transform: scaleX(0);
+      transform-origin: left center;
+      transition: transform 0.04s linear;
     }
 
     #radar-wrap {
