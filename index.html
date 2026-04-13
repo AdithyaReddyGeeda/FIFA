@@ -126,6 +126,43 @@
       gap: 10px;
       margin-top: 0.5rem;
     }
+    .difficulty-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin: 0.75rem 0 0.25rem;
+    }
+    .difficulty-row .diff-label {
+      width: 100%;
+      text-align: center;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #94a3b8;
+      letter-spacing: 0.08em;
+    }
+    .diff-btn {
+      padding: 8px 18px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(0,0,0,0.35);
+      color: #e2e8f0;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+    }
+    .diff-btn:hover {
+      border-color: rgba(74, 222, 128, 0.45);
+      color: #fff;
+    }
+    .diff-btn.active {
+      background: linear-gradient(180deg, #4ade80, #22c55e);
+      border-color: #16a34a;
+      color: #052e16;
+      box-shadow: 0 4px 14px rgba(34, 197, 94, 0.35);
+    }
     .menu-btn {
       min-width: 220px;
       padding: 14px 28px;
@@ -369,6 +406,84 @@
     }
     #controls-hint strong { color: #fff; }
 
+    #freekick-hint {
+      display: none;
+      position: absolute;
+      bottom: 120px;
+      left: 50%;
+      transform: translateX(-50%);
+      max-width: min(92vw, 420px);
+      padding: 10px 18px;
+      background: rgba(30, 58, 138, 0.92);
+      border-radius: 10px;
+      color: #fef9c3;
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-align: center;
+      border: 1px solid rgba(251, 191, 36, 0.45);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      z-index: 16;
+      line-height: 1.35;
+    }
+    #freekick-hint.visible { display: block; }
+
+    #penalty-hud {
+      display: none;
+      position: absolute;
+      top: 72px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 22px;
+      background: rgba(15, 23, 42, 0.88);
+      border-radius: 12px;
+      color: #f8fafc;
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      border: 1px solid rgba(251, 191, 36, 0.35);
+      box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+      z-index: 15;
+      text-align: center;
+      line-height: 1.5;
+    }
+    #penalty-hud.visible { display: block; }
+    #penalty-hud .penalty-hud-hint {
+      margin-top: 8px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: #94a3b8;
+      letter-spacing: 0.12em;
+    }
+
+    #penalty-saved {
+      position: absolute;
+      top: 42%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0);
+      padding: 18px 48px;
+      background: linear-gradient(180deg, rgba(30, 64, 175, 0.96), rgba(15, 23, 42, 0.98));
+      border-radius: 14px;
+      color: #fef3c7;
+      text-align: center;
+      pointer-events: none;
+      opacity: 0;
+      transition: transform 0.28s cubic-bezier(0.34,1.56,0.64,1), opacity 0.2s;
+      box-shadow: 0 10px 36px rgba(0,0,0,0.5);
+      z-index: 24;
+      border: 2px solid rgba(96, 165, 250, 0.4);
+    }
+    #penalty-saved.show {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+    }
+    #penalty-saved .penalty-saved-title {
+      font-size: 1.75rem;
+      font-weight: 900;
+      letter-spacing: 0.2em;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.45);
+    }
+
     #goal-popup {
       position: absolute;
       top: 42%;
@@ -597,6 +712,12 @@
     <div class="main-menu-landing">
       <h1>FIFA SOCCER GAME</h1>
       <p class="subtitle">Pick a match · choose formation in Custom</p>
+      <div class="difficulty-row" id="difficulty-row">
+        <span class="diff-label">Difficulty</span>
+        <button type="button" class="diff-btn" data-diff="easy">Easy</button>
+        <button type="button" class="diff-btn active" data-diff="medium">Medium</button>
+        <button type="button" class="diff-btn" data-diff="hard">Hard</button>
+      </div>
       <button type="button" class="menu-btn primary" id="btn-quick-match">Quick Match</button>
       <button type="button" class="menu-btn" id="btn-custom-match">Custom Match</button>
     </div>
@@ -624,6 +745,12 @@
           <option value="juventus" data-primary="#1A1A1A">Juventus (#1A1A1A)</option>
           <option value="chelsea" data-primary="#034694">Chelsea (#034694)</option>
         </select>
+      </div>
+      <div class="difficulty-row difficulty-row-custom">
+        <span class="diff-label">Difficulty</span>
+        <button type="button" class="diff-btn" data-diff="easy">Easy</button>
+        <button type="button" class="diff-btn active" data-diff="medium">Medium</button>
+        <button type="button" class="diff-btn" data-diff="hard">Hard</button>
       </div>
       <div class="custom-select-row">
         <label for="select-team-away">Away</label>
@@ -703,6 +830,20 @@
   <div id="hud">
     <div id="scoreboard">HOME - AWAY</div>
     <div id="match-timer">00:00</div>
+    <div id="freekick-hint">FREE KICK — Use ← → to aim, ↑ ↓ for power, hold E to shoot</div>
+    <div id="penalty-hud" aria-live="polite">
+      <div>
+        <span id="penalty-hud-label-home">Home</span>:
+        <span id="penalty-hud-home"></span>
+        &nbsp;&nbsp;vs&nbsp;&nbsp;
+        <span id="penalty-hud-label-away">Away</span>:
+        <span id="penalty-hud-away"></span>
+      </div>
+      <div class="penalty-hud-hint">SPACE — Shoot</div>
+    </div>
+    <div id="penalty-saved" aria-live="polite">
+      <div class="penalty-saved-title">SAVED!</div>
+    </div>
     <div id="shot-wrap">
       <label>Shot power</label>
       <div class="stamina-bar-bg"><div id="shot-bar"></div></div>
@@ -715,6 +856,7 @@
     <div id="controls-hint">
       <strong>Controls</strong><br />
       W A S D — Move · SHIFT — Sprint<br />
+      X: Shield ball<br />
       SPACE — Pass / Switch player<br />
       Hold E — Shoot (charge) · E — Tackle<br />
       Q — Through ball · C — Camera mode<br />
