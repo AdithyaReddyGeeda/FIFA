@@ -126,6 +126,142 @@
       gap: 10px;
       margin-top: 0.5rem;
     }
+    .weather-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 14px 0 4px;
+      flex-wrap: wrap;
+    }
+    .weather-row .weather-label {
+      color: #cbd5e1;
+      font-size: 0.85rem;
+      min-width: 4.5rem;
+    }
+    .weather-btn {
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(0,0,0,0.35);
+      color: #e2e8f0;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .weather-btn.active {
+      border-color: #4ade80;
+      background: rgba(34, 197, 94, 0.25);
+      color: #fff;
+    }
+    #sub-panel {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 250;
+      background: rgba(0,0,0,0.72);
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    #sub-panel.visible {
+      display: flex;
+    }
+    .sub-panel-inner {
+      background: #0f172a;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 12px;
+      padding: 20px 22px;
+      max-width: 420px;
+      width: 100%;
+      max-height: min(80vh, 520px);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    }
+    .sub-panel-inner h3 {
+      margin: 0;
+      color: #f8fafc;
+      font-size: 1.15rem;
+    }
+    #sub-instruction {
+      margin: 0;
+      color: #94a3b8;
+      font-size: 0.9rem;
+    }
+    #sub-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      overflow-y: auto;
+      max-height: 280px;
+    }
+    .sub-player-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      text-align: left;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(30, 41, 59, 0.9);
+      color: #e2e8f0;
+      cursor: pointer;
+      font: inherit;
+    }
+    .sub-player-row:hover {
+      background: rgba(51, 65, 85, 0.95);
+    }
+    .sub-player-row.sub-fresh {
+      border-color: rgba(74, 222, 128, 0.45);
+      box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.15);
+    }
+    .sub-num {
+      font-weight: 700;
+      min-width: 2rem;
+      color: #fbbf24;
+    }
+    .sub-role {
+      text-transform: uppercase;
+      font-size: 0.7rem;
+      color: #94a3b8;
+      width: 2.5rem;
+    }
+    .sub-bar {
+      flex: 1;
+      height: 8px;
+      background: rgba(0,0,0,0.45);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .sub-bar-fill {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, #166534, #4ade80);
+      border-radius: 4px;
+    }
+    .sub-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 6px;
+    }
+    .sub-actions button {
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.08);
+      color: #e2e8f0;
+      cursor: pointer;
+    }
+    .sub-actions button#sub-confirm {
+      background: rgba(34, 197, 94, 0.35);
+      border-color: #4ade80;
+    }
+    .sub-actions button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
     #team-rating-card {
       margin-top: 0.75rem;
       padding: 10px 12px;
@@ -229,6 +365,85 @@
     .menu-btn.primary {
       background: linear-gradient(180deg, #4ade80, #22c55e);
       color: #052e16;
+    }
+
+    #history-panel {
+      display: none;
+      margin-top: 1.5rem;
+      width: min(420px, 92vw);
+      text-align: center;
+    }
+    #history-panel h3 {
+      font-size: 0.82rem;
+      letter-spacing: 0.12em;
+      color: #94a3b8;
+      margin-bottom: 0.65rem;
+      font-weight: 600;
+    }
+    #history-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .history-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      font-family: ui-monospace, 'Cascadia Code', monospace;
+      font-size: 0.78rem;
+      padding: 7px 12px;
+      margin: 5px 0;
+      border-radius: 8px;
+      background: rgba(0,0,0,0.28);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .history-row .h-home,
+    .history-row .h-away {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .history-row .h-home { text-align: left; color: #cbd5e1; }
+    .history-row .h-away { text-align: right; color: #cbd5e1; }
+    .history-row .h-score {
+      flex: 0 0 auto;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .history-row.history-win .h-score { color: #4ade80; }
+    .history-row.history-loss .h-score { color: #f87171; }
+    .history-row.history-draw .h-score { color: #94a3b8; }
+
+    #hat-trick-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 150;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 0.75rem;
+      background: linear-gradient(145deg, rgba(200, 160, 40, 0.94) 0%, rgba(60, 45, 12, 0.96) 55%, rgba(20, 15, 6, 0.98) 100%);
+      color: #fff;
+      pointer-events: none;
+      text-align: center;
+      padding: 2rem;
+    }
+    #hat-trick-overlay.show {
+      display: flex;
+    }
+    #hat-trick-overlay .hat-trick-title {
+      font-size: clamp(2rem, 8vw, 3.5rem);
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-shadow: 0 4px 24px rgba(0,0,0,0.45);
+    }
+    #hat-trick-overlay .hat-trick-meta {
+      font-size: 1.25rem;
+      font-weight: 600;
+      opacity: 0.95;
     }
 
     /* Pause */
@@ -338,9 +553,62 @@
     }
     #hud.visible { display: block; }
 
+    #momentum-bar-wrap {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      z-index: 11;
+    }
+    .mom-team {
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: #e2e8f0;
+      letter-spacing: 0.06em;
+      min-width: 2.25rem;
+      text-align: center;
+      text-shadow: 0 1px 2px #000;
+    }
+    #momentum-track {
+      width: 200px;
+      height: 12px;
+      background: rgba(0,0,0,0.5);
+      border-radius: 6px;
+      position: relative;
+      border: 1px solid rgba(255,255,255,0.12);
+      overflow: hidden;
+    }
+    #momentum-fill {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 100px;
+      margin-left: -50px;
+      border-radius: 5px;
+      background: linear-gradient(90deg, #f87171, #fde047, #4ade80);
+      transform: translateX(0);
+      transition: transform 0.12s ease-out;
+      opacity: 0.95;
+    }
+    #momentum-center {
+      position: absolute;
+      left: 50%;
+      top: -2px;
+      bottom: -2px;
+      width: 2px;
+      margin-left: -1px;
+      background: rgba(255,255,255,0.45);
+      pointer-events: none;
+      z-index: 1;
+    }
+
     #scoreboard {
       position: absolute;
-      top: 16px;
+      top: 52px;
       left: 50%;
       transform: translateX(-50%);
       padding: 10px 28px;
@@ -372,11 +640,26 @@
       50% { color: #ff4444; }
     }
 
-    #stamina-wrap {
+    .stamina-subs-row {
       position: absolute;
       bottom: 24px;
       right: 20px;
+      display: flex;
+      align-items: flex-end;
+      gap: 14px;
+    }
+    #stamina-wrap {
+      position: relative;
       width: 180px;
+    }
+    #subs-hud {
+      color: #e2e8f0;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-shadow: 0 1px 2px #000;
+      white-space: nowrap;
+      margin-bottom: 2px;
     }
     #stamina-wrap label {
       display: block;
@@ -839,6 +1122,10 @@
       </div>
       <button type="button" class="menu-btn primary" id="btn-quick-match">Quick Match</button>
       <button type="button" class="menu-btn" id="btn-custom-match">Custom Match</button>
+      <div id="history-panel">
+        <h3>Recent Results</h3>
+        <ul id="history-list"></ul>
+      </div>
     </div>
     <div id="custom-match-panel" aria-hidden="true">
       <h2>CUSTOM MATCH</h2>
@@ -891,6 +1178,11 @@
         <div class="rating-row"><span>PAS</span><div class="rating-track"><div class="rating-bar" id="r-pas"></div></div></div>
         <div class="rating-row"><span>DEF</span><div class="rating-track"><div class="rating-bar" id="r-def"></div></div></div>
       </div>
+      <div class="weather-row">
+        <span class="weather-label">Weather</span>
+        <button type="button" class="weather-btn active" data-weather="clear">☀ Clear</button>
+        <button type="button" class="weather-btn" data-weather="rain">🌧 Rain</button>
+      </div>
       <div class="custom-actions">
         <button type="button" class="menu-btn primary" id="btn-kick-off-custom">Kick Off</button>
         <button type="button" class="menu-btn" id="btn-custom-back">Back</button>
@@ -902,6 +1194,8 @@
     <div class="pause-panel">
       <h2>PAUSED</h2>
       <button type="button" class="menu-btn" id="btn-resume">Resume (ESC)</button>
+      <button type="button" class="menu-btn" id="btn-fullscreen">⛶ Fullscreen</button>
+      <button type="button" class="menu-btn" id="btn-screenshot">📷 Screenshot</button>
       <button type="button" class="menu-btn" id="btn-pause-main">Main Menu</button>
     </div>
   </div>
@@ -953,7 +1247,20 @@
     <button type="button" class="menu-btn primary" id="btn-play-again">Play Again</button>
   </div>
 
+  <div id="hat-trick-overlay" aria-hidden="true">
+    <div class="hat-trick-title">🎩 HAT-TRICK! 🎩</div>
+    <div class="hat-trick-meta"><span id="hat-trick-num">#0</span> · <span id="hat-trick-team">Team</span></div>
+  </div>
+
   <div id="hud">
+    <div id="momentum-bar-wrap">
+      <span class="mom-team home-abbr">HOM</span>
+      <div id="momentum-track">
+        <div id="momentum-fill"></div>
+        <div id="momentum-center"></div>
+      </div>
+      <span class="mom-team away-abbr">AWY</span>
+    </div>
     <div id="scoreboard">HOME - AWAY</div>
     <div id="match-timer">00:00</div>
     <div id="freekick-hint">FREE KICK — Use ← → to aim, ↑ ↓ for power, hold E to shoot</div>
@@ -977,9 +1284,12 @@
       <label>Shot power</label>
       <div class="stamina-bar-bg"><div id="shot-bar"></div></div>
     </div>
-    <div id="stamina-wrap">
-      <label id="stamina-label">Stamina</label>
-      <div class="stamina-bar-bg"><div id="stamina-fill"></div></div>
+    <div class="stamina-subs-row">
+      <div id="subs-hud">SUBS: 3</div>
+      <div id="stamina-wrap">
+        <label id="stamina-label">Stamina</label>
+        <div class="stamina-bar-bg"><div id="stamina-fill"></div></div>
+      </div>
     </div>
     <div id="radar-wrap"><canvas id="minimap-canvas" width="150" height="150"></canvas></div>
     <div id="controls-hint">
@@ -989,7 +1299,7 @@
       SPACE — Pass / Switch player<br />
       Hold E — Shoot (charge) · E — Tackle<br />
       Q — Through ball · C — Camera mode<br />
-      ESC — Pause
+      TAB — Substitution · ESC — Pause
     </div>
     <div id="goal-popup">
       <div class="goal-title">GOAL!</div>
@@ -1006,6 +1316,18 @@
     </div>
     <div id="commentary-bar" aria-live="polite" aria-atomic="true">
       <span id="commentary-text"></span>
+    </div>
+  </div>
+
+  <div id="sub-panel" aria-hidden="true">
+    <div class="sub-panel-inner">
+      <h3>Substitution</h3>
+      <p id="sub-instruction">Select player to come OFF</p>
+      <div id="sub-list"></div>
+      <div class="sub-actions">
+        <button type="button" id="sub-cancel">Cancel (ESC)</button>
+        <button type="button" id="sub-confirm" disabled>Confirm</button>
+      </div>
     </div>
   </div>
 

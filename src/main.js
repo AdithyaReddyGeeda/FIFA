@@ -116,6 +116,13 @@ const GAME_CONFIG = {
   userTeamIndex: 0,
 };
 
+/** Restore targets for weather (rain) toggling — do not compound between matches */
+const WEATHER_SPEED_BASE = {
+  runSpeed: PLAYER_CONFIG.runSpeed,
+  sprintSpeed: PLAYER_CONFIG.sprintSpeed,
+};
+const WEATHER_BALL_FRICTION_BASE = GAME_CONFIG.ballFriction;
+
 /**
  * Preset clubs: primary = shirt, secondary = shorts/trim, accent = detail.
  * Keys match <select> option values in index.html.
@@ -393,6 +400,7 @@ const GAME_STATE = {
   GOAL_REPLAY: 'GOAL_REPLAY',
   PENALTY: 'PENALTY',
   FREEKICK: 'FREEKICK',
+  SUBSTITUTION: 'SUBSTITUTION',
 };
 
 // =============================================================================
@@ -415,6 +423,13 @@ let ballShadow = null;
 let homeGoalGroup = null;
 /** @type {THREE.Group | null} */
 let awayGoalGroup = null;
+/** 3D stadium scoreboard (CanvasTexture) */
+let scoreboardMesh = null;
+let scoreboardTexture = null;
+let scoreboardCanvas = null;
+let scoreboardCtx = null;
+/** Throttle for updateScoreboardTexture in updateUI */
+let scoreboard3dTimer = 0;
 let postShake = { group: null, timer: 0, intensity: 0 };
 let ballVelocity = new THREE.Vector3();
 /** Seconds until another ground-bounce tap can play (anti-spam). */
@@ -504,6 +519,23 @@ let keyEPressed = false;
 let keyQPressed = false;
 /** Virtual joystick direction (screen: +x right, +y down) mapped to world X/Z in getMovementVector */
 const touchMoveDir = new THREE.Vector2(0, 0);
+/** Left stick (axes 0,1); dead-zoned in readGamepad */
+const gamepadMoveDir = new THREE.Vector2(0, 0);
+/** Last-frame button pressed state for edge detection */
+const gamepadPrev = new Array(20).fill(false);
+let gamepadSprint = false;
+let gamepadShield = false;
+/** Y / Triangle held — shot charge (PLAYING / FREEKICK) */
+let gamepadYHeld = false;
+/** D-pad while taking a free kick (do not clobber keyboard keys) */
+let gamepadFkUp = false;
+let gamepadFkDown = false;
+let gamepadFkLeft = false;
+let gamepadFkRight = false;
+/** Horizontal orbit added to PLAYER_CAM (radians) */
+let playerCamGamepadYaw = 0;
+/** Vertical camera offset from right stick (axis 3), PLAYER_CAM only */
+let playerCamGamepadPitch = 0;
 let joystickActiveTouchId = null;
 /** True while mobile Shoot (B) held for charged shot */
 let touchShootHeld = false;
@@ -533,6 +565,36 @@ let celebrationRunners = [];
 let offsidePopupTimer = 0;
 let cardPopupTimer = 0;
 let uiTimerAccum = 0;
+let subsMade = 0;
+const MAX_SUBS = 3;
+/** @type {'off' | 'on' | null} */
+let subPanelPhase = null;
+/** @type {Player | null} */
+let subPlayerOut = null;
+/** @type {Player | null} */
+let subPlayerIn = null;
+
+let weatherMode = 'clear';
+/** @type {THREE.Points | null} */
+let rainSystem = null;
+/** @type {Float32Array | null} */
+let rainVel = null;
+const RAIN_COUNT = 800;
+
+let aerialDuelCooldown = 0;
+
+let cameraShake = { timer: 0, intensity: 0, fadeDuration: 0 };
+const cameraShakeOffset = new THREE.Vector3();
+
+const goalScorers = new Map();
+/** -1 away … +1 home */
+let momentumScore = 0;
+let momentumTickAccum = 0;
+
+/** @type {THREE.Mesh[]} */
+const cornerFlagMeshes = [];
+
+const matchHistory = [];
 
 /** Yellow cards per player; value 1 = one yellow — next yellow becomes red. */
 const yellowCards = new Map();
@@ -694,6 +756,14 @@ let elCommentaryBar;
 let elCommentaryText;
 let elStaminaWrap;
 let elStaminaLabel;
+let elSubPanel;
+let elSubsHud;
+let elMomentumFill;
+let elMomHome;
+let elMomAway;
+let elHatTrickOverlay;
+
+let hatTrickHideTimer = null;
 
 // =============================================================================
 // PLAYER CLASS
@@ -725,6 +795,7 @@ class Player {
     this.diveTimer = 0;
     this.createMesh();
     const r = getPlayerRating(teamIndex, slotIndex);
+    this.paceRating = r.pace;
     this.maxSpeed = PLAYER_CONFIG.runSpeed * (0.8 + r.pace * 0.4);
     this.sprintSpeed = PLAYER_CONFIG.sprintSpeed * (0.8 + r.pace * 0.4);
     this.shotAccuracy = 0.6 + r.shooting * 0.35;
@@ -798,6 +869,8 @@ class Player {
     canvas.width = 64;
     canvas.height = 64;
     const ctx = canvas.getContext('2d');
+    this.jerseyCanvas = canvas;
+    this.jerseyCtx = ctx;
     if (ctx) {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, 64, 64);
@@ -809,6 +882,7 @@ class Player {
     }
     const tex = new THREE.CanvasTexture(canvas);
     tex.needsUpdate = true;
+    this.jerseyNumberTex = tex;
     const jerseyGeo = new THREE.PlaneGeometry(0.55, 0.55);
     const jerseyMat = new THREE.MeshBasicMaterial({
       map: tex,
@@ -837,6 +911,19 @@ class Player {
 
     this.mesh = group;
     this.mesh.userData.player = this;
+  }
+
+  redrawJerseyNumber() {
+    if (!this.jerseyCtx || !this.jerseyNumberTex) return;
+    const ctx = this.jerseyCtx;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 64, 64);
+    ctx.fillStyle = '#111';
+    ctx.font = 'bold 36px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(this.slotIndex + 1), 32, 34);
+    this.jerseyNumberTex.needsUpdate = true;
   }
 
   /** Sync body / shorts / legs to current TEAMS colors (after custom match). */
@@ -978,6 +1065,7 @@ function setupRenderer(canvas) {
     canvas,
     antialias: true,
     powerPreference: 'high-performance',
+    preserveDrawingBuffer: true,
   });
   r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   r.setSize(window.innerWidth, window.innerHeight);
@@ -1159,9 +1247,9 @@ function createPitch() {
 
 function createCornerFlags() {
   if (!scene) return;
+  cornerFlagMeshes.length = 0;
   const flagPoleGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.5, 6);
   const flagPoleMat = new THREE.MeshStandardMaterial({ color: 0xffff00 });
-  const flagGeo = new THREE.PlaneGeometry(0.35, 0.22);
   const flagMat = new THREE.MeshBasicMaterial({
     color: 0xff0000,
     side: THREE.DoubleSide,
@@ -1179,12 +1267,169 @@ function createCornerFlags() {
     const pole = new THREE.Mesh(flagPoleGeo, flagPoleMat);
     pole.position.y = 0.75;
     group.add(pole);
+    const flagGeo = new THREE.PlaneGeometry(0.35, 0.22, 4, 2);
     const flag = new THREE.Mesh(flagGeo, flagMat);
     flag.position.set(0.175, 1.45, 0);
+    const posAttr = flagGeo.attributes.position;
+    flag.userData.cornerFlagRest = new Float32Array(posAttr.array);
+    cornerFlagMeshes.push(flag);
     group.add(flag);
     group.position.set(cx, 0, cz);
     scene.add(group);
   });
+}
+
+function updateCornerFlags(elapsed) {
+  for (const flag of cornerFlagMeshes) {
+    const rest = flag.userData.cornerFlagRest;
+    if (!rest) continue;
+    const pos = flag.geometry.attributes.position;
+    const arr = pos.array;
+    const w = 0.35;
+    for (let vi = 0; vi < arr.length / 3; vi++) {
+      const i = vi * 3;
+      const rx = rest[i];
+      const ry = rest[i + 1];
+      const rz = rest[i + 2];
+      const u = rx / w + 0.5;
+      arr[i] = rx;
+      arr[i + 1] = ry + Math.sin(elapsed * 2.8 + u * 3.2) * u * 0.02;
+      arr[i + 2] = rz + Math.sin(elapsed * 3.5 + u * 4) * u * 0.06;
+    }
+    pos.needsUpdate = true;
+    flag.geometry.computeVertexNormals();
+  }
+}
+
+function triggerCameraShake(intensity, duration) {
+  cameraShake.intensity = Math.max(cameraShake.intensity, intensity);
+  const nt = Math.max(cameraShake.timer, duration);
+  cameraShake.fadeDuration = Math.max(cameraShake.fadeDuration, nt);
+  cameraShake.timer = nt;
+}
+
+function applyCameraShake(deltaTime) {
+  if (!camera || cameraShake.timer <= 0) return;
+  cameraShake.timer -= deltaTime;
+  const decay =
+    cameraShake.fadeDuration > 1e-6
+      ? THREE.MathUtils.clamp(
+          cameraShake.timer / cameraShake.fadeDuration,
+          0,
+          1
+        )
+      : 0;
+  cameraShakeOffset.set(
+    (Math.random() - 0.5) * 2 * cameraShake.intensity * decay,
+    (Math.random() - 0.5) * 2 * cameraShake.intensity * decay * 0.4,
+    0
+  );
+  camera.position.add(cameraShakeOffset);
+  if (cameraShake.timer <= 0) {
+    cameraShake.intensity = 0;
+    cameraShake.fadeDuration = 0;
+    cameraShakeOffset.set(0, 0, 0);
+  }
+}
+
+function showHatTrick(player) {
+  if (!elHatTrickOverlay) return;
+  const num = player.slotIndex + 1;
+  const teamName =
+    player.teamIndex === 0 ? TEAMS.home.name : TEAMS.away.name;
+  const numEl = document.getElementById('hat-trick-num');
+  const teamEl = document.getElementById('hat-trick-team');
+  if (numEl) numEl.textContent = `#${num}`;
+  if (teamEl) teamEl.textContent = teamName;
+  playSound('whistle');
+  showCommentary(`HAT-TRICK! Incredible from #${num}!`, 2);
+  elHatTrickOverlay.classList.add('show');
+  if (hatTrickHideTimer) clearTimeout(hatTrickHideTimer);
+  hatTrickHideTimer = setTimeout(() => {
+    elHatTrickOverlay.classList.remove('show');
+    hatTrickHideTimer = null;
+  }, 4000);
+}
+
+function registerOpenPlayGoalMilestones(scoringTeamIndex) {
+  if (!lastShooter || lastShooter.teamIndex !== scoringTeamIndex) return;
+  const prev = goalScorers.get(lastShooter) ?? 0;
+  const newCount = prev + 1;
+  goalScorers.set(lastShooter, newCount);
+  const num = lastShooter.slotIndex + 1;
+  if (newCount === 2) {
+    setTimeout(
+      () => showCommentary(`Brace! #${num} with their second goal!`, 2),
+      3500
+    );
+  } else if (newCount === 3) {
+    const scorer = lastShooter;
+    setTimeout(() => showHatTrick(scorer), 3500);
+  } else if (newCount > 3) {
+    setTimeout(
+      () =>
+        showCommentary(`Unbelievable! #${num} with ${newCount} goals!`, 2),
+      3500
+    );
+  }
+}
+
+function pushMatchToHistory() {
+  const penWinnerTeam = lastFulltimePenaltyWinner;
+  matchHistory.push({
+    home: TEAMS.home.name,
+    away: TEAMS.away.name,
+    homeScore,
+    awayScore,
+    penalties: penWinnerTeam !== null,
+    penaltyWinner:
+      penWinnerTeam !== null
+        ? penWinnerTeam === 0
+          ? TEAMS.home.name
+          : TEAMS.away.name
+        : null,
+    date: new Date().toLocaleTimeString(),
+  });
+  updateHistoryPanel();
+}
+
+function updateHistoryPanel() {
+  const list = document.getElementById('history-list');
+  if (!list) return;
+  list.innerHTML = '';
+  const recent = matchHistory.slice(-5).reverse();
+  const u = GAME_CONFIG.userTeamIndex;
+  for (const r of recent) {
+    const li = document.createElement('li');
+    li.className = 'history-row';
+    const penNote = r.penalties ? ` (pens: ${r.penaltyWinner})` : '';
+    const score = `${r.homeScore} - ${r.awayScore}${penNote}`;
+    const userGoals = u === 0 ? r.homeScore : r.awayScore;
+    const oppGoals = u === 0 ? r.awayScore : r.homeScore;
+    let outcome = 'draw';
+    if (userGoals > oppGoals) outcome = 'win';
+    else if (userGoals < oppGoals) outcome = 'loss';
+    li.classList.add(`history-${outcome}`);
+    li.innerHTML = `
+      <span class="h-home">${r.home}</span>
+      <span class="h-score">${score}</span>
+      <span class="h-away">${r.away}</span>
+    `;
+    list.appendChild(li);
+  }
+  const panel = document.getElementById('history-panel');
+  if (panel) panel.style.display = matchHistory.length ? 'block' : 'none';
+}
+
+function toggleFullscreen() {
+  const btn = document.getElementById('btn-fullscreen');
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen?.();
+    if (btn) btn.textContent = '✕ Exit Fullscreen';
+  } else {
+    document.exitFullscreen?.();
+    if (btn) btn.textContent = '⛶ Fullscreen';
+  }
 }
 
 function createStandSeatTexture(primaryHex, secondaryHex) {
@@ -1315,6 +1560,248 @@ function createStadiumEnvironment() {
     spot.target.position.set(0, 0, 0);
     scene.add(spot);
     scene.add(spot.target);
+  }
+}
+
+function createScoreboard() {
+  if (!scene) return;
+  scoreboardCanvas = document.createElement('canvas');
+  scoreboardCanvas.width = 512;
+  scoreboardCanvas.height = 128;
+  scoreboardCtx = scoreboardCanvas.getContext('2d');
+  if (!scoreboardCtx) return;
+
+  scoreboardTexture = new THREE.CanvasTexture(scoreboardCanvas);
+  scoreboardTexture.colorSpace = THREE.SRGBColorSpace;
+  scoreboardTexture.needsUpdate = true;
+
+  const geo = new THREE.PlaneGeometry(18, 4.5);
+  const mat = new THREE.MeshBasicMaterial({
+    map: scoreboardTexture,
+    side: THREE.DoubleSide,
+  });
+  scoreboardMesh = new THREE.Mesh(geo, mat);
+  scoreboardMesh.position.set(0, 16, -(PITCH_CONFIG.halfLength + 8));
+  scoreboardMesh.rotation.y = Math.PI;
+  scene.add(scoreboardMesh);
+
+  updateScoreboardTexture();
+}
+
+function updateScoreboardTexture() {
+  const ctx = scoreboardCtx;
+  if (!ctx || !scoreboardTexture || !scoreboardCanvas) return;
+  const w = scoreboardCanvas.width;
+  const h = scoreboardCanvas.height;
+
+  ctx.fillStyle = '#111111';
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.strokeStyle = '#ffdd00';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(3, 3, w - 6, h - 6);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 28px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(TEAMS.home.name.toUpperCase().slice(0, 10), 20, 50);
+  ctx.textAlign = 'right';
+  ctx.fillText(TEAMS.away.name.toUpperCase().slice(0, 10), w - 20, 50);
+
+  ctx.font = 'bold 52px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffdd00';
+  ctx.fillText(`${homeScore}  -  ${awayScore}`, w / 2, 100);
+
+  ctx.font = '20px monospace';
+  ctx.fillStyle = '#aaaaaa';
+  ctx.fillText(currentHalf === 1 ? '1ST HALF' : '2ND HALF', w / 2, 30);
+
+  scoreboardTexture.needsUpdate = true;
+}
+
+function applyWeatherForMatch() {
+  if (weatherMode === 'rain') {
+    GAME_CONFIG.ballFriction = WEATHER_BALL_FRICTION_BASE * 0.992;
+    PLAYER_CONFIG.runSpeed = WEATHER_SPEED_BASE.runSpeed * 0.93;
+    PLAYER_CONFIG.sprintSpeed = WEATHER_SPEED_BASE.sprintSpeed * 0.93;
+  } else {
+    GAME_CONFIG.ballFriction = WEATHER_BALL_FRICTION_BASE;
+    PLAYER_CONFIG.runSpeed = WEATHER_SPEED_BASE.runSpeed;
+    PLAYER_CONFIG.sprintSpeed = WEATHER_SPEED_BASE.sprintSpeed;
+  }
+}
+
+function initRain() {
+  if (!scene || rainSystem) return;
+  const rainGeo = new THREE.BufferGeometry();
+  const rainPos = new Float32Array(RAIN_COUNT * 3);
+  rainVel = new Float32Array(RAIN_COUNT);
+  for (let i = 0; i < RAIN_COUNT; i += 1) {
+    rainPos[i * 3] = (Math.random() - 0.5) * 160;
+    rainPos[i * 3 + 1] = Math.random() * 40;
+    rainPos[i * 3 + 2] = (Math.random() - 0.5) * 120;
+    rainVel[i] = 18 + Math.random() * 12;
+  }
+  rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+  const rainMat = new THREE.PointsMaterial({
+    color: 0xaaddff,
+    size: 0.12,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false,
+  });
+  rainSystem = new THREE.Points(rainGeo, rainMat);
+  rainSystem.visible = weatherMode === 'rain';
+  scene.add(rainSystem);
+}
+
+function updateRain(deltaTime) {
+  if (!rainSystem || !rainSystem.visible || !rainVel) return;
+  const pos = rainSystem.geometry.attributes.position.array;
+  for (let i = 0; i < RAIN_COUNT; i += 1) {
+    pos[i * 3 + 1] -= rainVel[i] * deltaTime;
+    pos[i * 3] -= 2 * deltaTime;
+    if (pos[i * 3 + 1] < -1) {
+      pos[i * 3] = (Math.random() - 0.5) * 160;
+      pos[i * 3 + 1] = 38 + Math.random() * 5;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 120;
+    }
+  }
+  rainSystem.geometry.attributes.position.needsUpdate = true;
+}
+
+function ensureRainSystem() {
+  if (!scene) return;
+  if (!rainSystem) initRain();
+  if (rainSystem) rainSystem.visible = weatherMode === 'rain';
+}
+
+function getUserOutfieldPlayers() {
+  return players.filter(
+    (p) => p.teamIndex === GAME_CONFIG.userTeamIndex && p.role !== 'gk'
+  );
+}
+
+function refreshPlayerRatingsFromSlot(p) {
+  const r = getPlayerRating(p.teamIndex, p.slotIndex);
+  p.paceRating = r.pace;
+  p.maxSpeed = PLAYER_CONFIG.runSpeed * (0.8 + r.pace * 0.4);
+  p.sprintSpeed = PLAYER_CONFIG.sprintSpeed * (0.8 + r.pace * 0.4);
+  p.shotAccuracy = 0.6 + r.shooting * 0.35;
+  p.passAccuracy = 0.65 + r.passing * 0.3;
+  p.tackleStrength = 0.5 + r.defending * 0.5;
+}
+
+function cancelSubstitution() {
+  subPanelPhase = null;
+  subPlayerOut = null;
+  subPlayerIn = null;
+  setState(GAME_STATE.PLAYING);
+}
+
+function performSubstitution(outPl, inPl) {
+  if (
+    !outPl ||
+    !inPl ||
+    outPl === inPl ||
+    outPl.teamIndex !== GAME_CONFIG.userTeamIndex ||
+    inPl.teamIndex !== GAME_CONFIG.userTeamIndex
+  ) {
+    return;
+  }
+  const outNum = outPl.slotIndex + 1;
+  const inNum = inPl.slotIndex + 1;
+
+  if (ballOwner === outPl) {
+    ballOwner = inPl;
+    inPl.hasBall = true;
+    outPl.hasBall = false;
+  }
+
+  const sTmp = outPl.slotIndex;
+  outPl.slotIndex = inPl.slotIndex;
+  inPl.slotIndex = sTmp;
+  const rTmp = outPl.role;
+  outPl.role = inPl.role;
+  inPl.role = rTmp;
+
+  tmpV1.copy(outPl.mesh.position);
+  outPl.mesh.position.copy(inPl.mesh.position);
+  inPl.mesh.position.copy(tmpV1);
+  outPl.mesh.position.y = 0;
+  inPl.mesh.position.y = 0;
+
+  tmpV1.copy(outPl.formationWorld);
+  outPl.formationWorld.copy(inPl.formationWorld);
+  inPl.formationWorld.copy(tmpV1);
+
+  tmpV1.copy(outPl.velocity);
+  outPl.velocity.copy(inPl.velocity);
+  inPl.velocity.copy(tmpV1);
+
+  const rotTmp = outPl.rotation;
+  outPl.rotation = inPl.rotation;
+  inPl.rotation = rotTmp;
+  outPl.mesh.rotation.y = outPl.rotation;
+  inPl.mesh.rotation.y = inPl.rotation;
+
+  refreshPlayerRatingsFromSlot(outPl);
+  refreshPlayerRatingsFromSlot(inPl);
+
+  inPl.stamina = PLAYER_CONFIG.staminaMax;
+
+  outPl.redrawJerseyNumber();
+  inPl.redrawJerseyNumber();
+
+  if (controlledPlayer === outPl) {
+    controlledPlayer = inPl;
+    players.forEach((p) => {
+      p.isUserControlled = p === controlledPlayer;
+    });
+    attachControlledLabelToPlayer(controlledPlayer);
+  }
+
+  subsMade += 1;
+  showCommentary(`Substitution: #${outNum} off, #${inNum} on`, 1);
+  subPanelPhase = null;
+  subPlayerOut = null;
+  subPlayerIn = null;
+  setState(GAME_STATE.PLAYING);
+}
+
+function renderSubPanelList() {
+  const list = document.getElementById('sub-list');
+  const instr = document.getElementById('sub-instruction');
+  const confirmBtn = document.getElementById('sub-confirm');
+  if (!list || !instr || !confirmBtn) return;
+  list.innerHTML = '';
+  if (subPanelPhase === 'off') {
+    instr.textContent = 'Select player to come OFF';
+    for (const p of getUserOutfieldPlayers()) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'sub-player-row';
+      row.dataset.slot = String(p.slotIndex);
+      const pct = Math.round((p.stamina / PLAYER_CONFIG.staminaMax) * 100);
+      row.innerHTML = `<span class="sub-num">#${p.slotIndex + 1}</span><span class="sub-role">${p.role}</span><span class="sub-bar"><span class="sub-bar-fill" style="width:${pct}%"></span></span>`;
+      list.appendChild(row);
+    }
+    confirmBtn.disabled = true;
+  } else if (subPanelPhase === 'on' && subPlayerOut) {
+    instr.textContent = 'Select player to come ON';
+    for (const p of getUserOutfieldPlayers()) {
+      if (p === subPlayerOut) continue;
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'sub-player-row';
+      if (p.stamina > 70) row.classList.add('sub-fresh');
+      row.dataset.slot = String(p.slotIndex);
+      const pct = Math.round((p.stamina / PLAYER_CONFIG.staminaMax) * 100);
+      row.innerHTML = `<span class="sub-num">#${p.slotIndex + 1}</span><span class="sub-role">${p.role}</span><span class="sub-bar"><span class="sub-bar-fill" style="width:${pct}%"></span></span>`;
+      list.appendChild(row);
+    }
+    confirmBtn.disabled = !subPlayerIn;
   }
 }
 
@@ -1456,12 +1943,57 @@ function updateNetDeform(deltaTime) {
 // BALL
 // =============================================================================
 
+function createBallTexture() {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, size, size);
+
+  const panels = [
+    [size / 2, size / 2],
+    [size / 2, size * 0.22],
+    [size * 0.78, size * 0.62],
+    [size * 0.22, size * 0.62],
+    [size * 0.72, size * 0.2],
+    [size * 0.28, size * 0.2],
+  ];
+  ctx.fillStyle = '#111111';
+  panels.forEach(([px, py]) => {
+    ctx.beginPath();
+    for (let i = 0; i < 6; i += 1) {
+      const angle = (Math.PI / 3) * i - Math.PI / 6;
+      const r = size * 0.1;
+      const x = px + r * Math.cos(angle);
+      const y = py + r * Math.sin(angle);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  });
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 function createBall() {
   const geo = new THREE.SphereGeometry(GAME_CONFIG.ballRadius, 24, 18);
+  const ballMap = createBallTexture();
   const mat = new THREE.MeshStandardMaterial({
-    color: 0x111111,
-    roughness: 0.35,
-    metalness: 0.15,
+    map: ballMap || undefined,
+    color: ballMap ? 0xffffff : 0x111111,
+    roughness: 0.3,
+    metalness: 0.0,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;
@@ -2100,8 +2632,74 @@ function applyAccuracy(dir, accuracy, spreadMul = 1) {
     .normalize();
 }
 
-function checkBallControl() {
+function checkBallControl(deltaTime = 1 / 60) {
   if (!gameBall || ballOwner) return;
+
+  if (aerialDuelCooldown > 0) {
+    aerialDuelCooldown -= deltaTime;
+  }
+
+  if (gameBall.position.y > 1.5 && !ballOwner && aerialDuelCooldown <= 0) {
+    let bestA = null;
+    let bestAd = 1e9;
+    let bestB = null;
+    let bestBd = 1e9;
+    for (const p of players) {
+      const d = p.position.distanceTo(gameBall.position);
+      if (d < 2.5) {
+        if (p.teamIndex === 0 && d < bestAd) {
+          bestAd = d;
+          bestA = p;
+        }
+        if (p.teamIndex === 1 && d < bestBd) {
+          bestBd = d;
+          bestB = p;
+        }
+      }
+    }
+    if (bestA && bestB) {
+      const aRating = bestA.paceRating ?? 0.75;
+      const bRating = bestB.paceRating ?? 0.75;
+      const aWins = Math.random() < 0.5 + (aRating - bRating) * 0.3;
+      const winner = aWins ? bestA : bestB;
+      const gz = getAttackingGoalZ(winner.teamIndex);
+      const dir = new THREE.Vector3(0, 0, gz).sub(gameBall.position);
+      dir.y = 0;
+      if (dir.lengthSq() < 1e-6) {
+        dir.set(0, 0, winner.teamIndex === 0 ? 1 : -1);
+      } else {
+        dir.normalize();
+      }
+      ballVelocity.set(dir.x * 8, 3, dir.z * 8);
+      lastTouchTeam = winner.teamIndex;
+      playSound('kick');
+      showCommentary(aWins ? 'Header!' : 'Aerial challenge won!', 0);
+      aerialDuelCooldown = 0.35;
+      return;
+    }
+    if (bestA || bestB) {
+      const winner = bestA ?? bestB;
+      if (
+        winner.teamIndex === GAME_CONFIG.userTeamIndex ||
+        Math.random() < 0.7
+      ) {
+        const gz = getAttackingGoalZ(winner.teamIndex);
+        const dir = new THREE.Vector3(0, 0, gz).sub(gameBall.position);
+        dir.y = 0;
+        if (dir.lengthSq() < 1e-6) {
+          dir.set(0, 0, winner.teamIndex === 0 ? 1 : -1);
+        } else {
+          dir.normalize();
+        }
+        ballVelocity.set(dir.x * 10, 2, dir.z * 10);
+        lastTouchTeam = winner.teamIndex;
+        playSound('kick');
+      }
+      aerialDuelCooldown = 0.35;
+      return;
+    }
+  }
+
   const spd = ballVelocity.length();
   if (spd > GAME_CONFIG.ballControlSpeedMax) return;
 
@@ -2459,10 +3057,14 @@ function resetBallToPasser(passer) {
   gameBall.position.y = GAME_CONFIG.ballRadius;
 }
 
-function showOffside() {
+function showOffside(offsideTeamIndex) {
   offsidePopupTimer = 2;
   if (elOffsidePopup) elOffsidePopup.classList.add('show');
   showCommentary('Offside flag raised — play stops.', 1);
+  if (offsideTeamIndex === 0 || offsideTeamIndex === 1) {
+    momentumScore -= 0.04 * (offsideTeamIndex === 0 ? 1 : -1);
+    momentumScore = THREE.MathUtils.clamp(momentumScore, -1, 1);
+  }
 }
 
 function performPass(player) {
@@ -2473,7 +3075,7 @@ function performPass(player) {
   dir.y = 0;
   if (dir.lengthSq() < 1e-4) return;
   if (isReceiverOffside(player, mate)) {
-    showOffside();
+    showOffside(player.teamIndex);
     resetBallToPasser(player);
     return;
   }
@@ -2481,6 +3083,8 @@ function performPass(player) {
   dir = applyAccuracy(dir, player.passAccuracy);
   const power = GAME_CONFIG.kickBasePower * GAME_CONFIG.passPowerMul;
   lastTouchTeam = player.teamIndex;
+  momentumScore += 0.04 * (player.teamIndex === 0 ? 1 : -1);
+  momentumScore = THREE.MathUtils.clamp(momentumScore, -1, 1);
   passesCompleted[player.teamIndex] += 1;
   releaseBallFromOwner();
   player.hasBall = false;
@@ -2551,7 +3155,7 @@ function performThroughBall(player) {
   dir.y = 0;
   if (dir.lengthSq() < 1e-4) return;
   if (isReceiverOffside(player, mate)) {
-    showOffside();
+    showOffside(player.teamIndex);
     resetBallToPasser(player);
     return;
   }
@@ -2613,6 +3217,9 @@ function performTackle(player) {
 
   if (hadBallBefore) {
     playSound('tackle');
+    triggerCameraShake(0.2, 0.18);
+    momentumScore -= 0.06 * (best.teamIndex === 0 ? 1 : -1);
+    momentumScore = THREE.MathUtils.clamp(momentumScore, -1, 1);
   }
 }
 
@@ -2642,6 +3249,9 @@ function switchToClosestPlayer() {
 // =============================================================================
 
 function showGoal(teamName, options) {
+  if (!options?.penaltyOnly) {
+    triggerCameraShake(0.6, 0.5);
+  }
   playSound('whistle');
   playSound('crowd_cheer');
   goalPopupTimer = options?.penaltyOnly ? 2 : 3;
@@ -2793,6 +3403,7 @@ function penaltyShoot() {
   if (scored) {
     penaltyScores[t] += 1;
     penaltyResults[t].push('s');
+    triggerCameraShake(0.5, 0.4);
     showGoal(t === 0 ? TEAMS.home.name : TEAMS.away.name, { penaltyOnly: true });
   } else {
     penaltyResults[t].push('m');
@@ -2942,6 +3553,7 @@ function checkNearMissShots(deltaTime) {
       postShake.group = homeGoalGroup;
       postShake.timer = 0.35;
       postShake.intensity = 0.08;
+      triggerCameraShake(0.3, 0.25);
       showCommentary('So close! Just wide of the post.', 1);
       return;
     }
@@ -2956,6 +3568,7 @@ function checkNearMissShots(deltaTime) {
       postShake.group = awayGoalGroup;
       postShake.timer = 0.35;
       postShake.intensity = 0.08;
+      triggerCameraShake(0.3, 0.25);
       showCommentary('So close! Just wide of the post.', 1);
     }
   }
@@ -2999,6 +3612,12 @@ function checkGoals() {
         celebrationRunners = [];
         celebrationTimer = 0;
       }
+      {
+        const mood = 0.12 + 0.25;
+        momentumScore -= mood;
+        momentumScore = THREE.MathUtils.clamp(momentumScore, -1, 1);
+      }
+      registerOpenPlayGoalMilestones(1);
       showGoal(TEAMS.away.name);
     }
   }
@@ -3019,6 +3638,12 @@ function checkGoals() {
         celebrationRunners = [];
         celebrationTimer = 0;
       }
+      {
+        const mood = 0.12 + 0.25;
+        momentumScore += mood;
+        momentumScore = THREE.MathUtils.clamp(momentumScore, -1, 1);
+      }
+      registerOpenPlayGoalMilestones(0);
       showGoal(TEAMS.home.name);
     }
   }
@@ -3035,6 +3660,31 @@ function resetAfterGoal() {
 function getMovementVector() {
   if (touchMoveDir.length() > 0.1) {
     tmpV1.set(touchMoveDir.x, 0, touchMoveDir.y);
+    if (tmpV1.lengthSq() > 1) tmpV1.normalize();
+    return tmpV1;
+  }
+
+  if (gamepadMoveDir.length() > 0.15) {
+    tmpV1.set(gamepadMoveDir.x, 0, gamepadMoveDir.y);
+    if (tmpV1.lengthSq() > 1) tmpV1.normalize();
+    if (!camera) {
+      return tmpV1;
+    }
+    const camForward = new THREE.Vector3();
+    camera.getWorldDirection(camForward);
+    camForward.y = 0;
+    if (camForward.lengthSq() < 1e-10) {
+      return tmpV1;
+    }
+    camForward.normalize();
+    const camRight = new THREE.Vector3();
+    camRight.crossVectors(camForward, new THREE.Vector3(0, 1, 0)).normalize();
+    const gx = tmpV1.x;
+    const gz = tmpV1.z;
+    tmpV1
+      .set(0, 0, 0)
+      .addScaledVector(camForward, -gz)
+      .addScaledVector(camRight, gx);
     if (tmpV1.lengthSq() > 1) tmpV1.normalize();
     return tmpV1;
   }
@@ -3091,7 +3741,7 @@ function updatePlayerMovement(deltaTime) {
 
   if (
     shotCharging &&
-    (keys.KeyE || touchShootHeld) &&
+    (keys.KeyE || touchShootHeld || gamepadYHeld) &&
     controlledPlayer.hasBall &&
     ballOwner === controlledPlayer
   ) {
@@ -3102,12 +3752,16 @@ function updatePlayerMovement(deltaTime) {
   }
 
   const dir = getMovementVector();
-  const sprint = !!(keys.ShiftLeft || keys.ShiftRight);
+  const sprint = !!(
+    keys.ShiftLeft ||
+    keys.ShiftRight ||
+    gamepadSprint
+  );
 
   if (
     controlledPlayer.hasBall &&
     ballOwner === controlledPlayer &&
-    keys.KeyX
+    (keys.KeyX || gamepadShield)
   ) {
     controlledPlayer.isShielding = true;
     controlledPlayer.shieldStealRadiusMul = 2;
@@ -3241,6 +3895,8 @@ function aiGoalkeeperBehavior(p, deltaTime) {
         lastGkSaveStatAt[def] = t;
         const atk = def === 0 ? 1 : 0;
         shotsOnTarget[atk] += 1;
+        momentumScore += 0.12 * (atk === 0 ? 1 : -1);
+        momentumScore = THREE.MathUtils.clamp(momentumScore, -1, 1);
         showCommentary('Brilliant save by the keeper!', 1);
       }
     }
@@ -3548,6 +4204,12 @@ function formatMatchClock(sec) {
 function updateMatchTime(deltaTime) {
   if (gameState !== GAME_STATE.PLAYING) return;
   matchTimeSec += deltaTime;
+  momentumTickAccum += deltaTime;
+  while (momentumTickAccum >= 1) {
+    momentumTickAccum -= 1;
+    momentumScore *= 0.96;
+    momentumScore = THREE.MathUtils.clamp(momentumScore, -1, 1);
+  }
   matchFatigueFactor =
     1.0 -
     Math.min(
@@ -3667,8 +4329,19 @@ function setState(next) {
         next === GAME_STATE.PAUSED ||
         next === GAME_STATE.GOAL_REPLAY ||
         next === GAME_STATE.PENALTY ||
-        next === GAME_STATE.FREEKICK
+        next === GAME_STATE.FREEKICK ||
+        next === GAME_STATE.SUBSTITUTION
     );
+  }
+
+  if (elSubPanel) {
+    elSubPanel.classList.toggle('visible', next === GAME_STATE.SUBSTITUTION);
+  }
+  if (next === GAME_STATE.SUBSTITUTION) {
+    subPanelPhase = 'off';
+    subPlayerOut = null;
+    subPlayerIn = null;
+    renderSubPanelList();
   }
 
   if (next === GAME_STATE.PENALTY && elPenaltyHud) {
@@ -3692,6 +4365,9 @@ function setState(next) {
       'Half time whistle! The referee brings the first half to a close.',
       1
     );
+  }
+  if (next === GAME_STATE.FULLTIME && prev !== GAME_STATE.FULLTIME) {
+    pushMatchToHistory();
   }
   if (next === GAME_STATE.FULLTIME) {
     if (elFulltimeScore) elFulltimeScore.textContent = `${homeScore} - ${awayScore}`;
@@ -3724,6 +4400,7 @@ function resetMatchStats() {
   passesCompleted[1] = 0;
   lastGkSaveStatAt[0] = 0;
   lastGkSaveStatAt[1] = 0;
+  goalScorers.clear();
 }
 
 function startMatch() {
@@ -3732,6 +4409,11 @@ function startMatch() {
   if (cameraPersp) camera = cameraPersp;
   yellowCards.clear();
   resetMatchStats();
+  momentumScore = 0;
+  momentumTickAccum = 0;
+  subsMade = 0;
+  applyWeatherForMatch();
+  ensureRainSystem();
   homeScore = 0;
   awayScore = 0;
   matchTimeSec = 0;
@@ -3811,11 +4493,15 @@ function updateCamera(deltaTime) {
     camera.up.set(0, 0, -1);
     camera.lookAt(0, 0, 0);
     updateControlledLabelBillboard();
+    applyCameraShake(deltaTime);
     return;
   }
 
   if (!cameraPersp || camera !== cameraPersp) return;
-  if (!controlledPlayer) return;
+  if (!controlledPlayer) {
+    applyCameraShake(deltaTime);
+    return;
+  }
 
   const lerp = GAME_CONFIG.cameraLerp;
   const p = controlledPlayer.position;
@@ -3847,14 +4533,16 @@ function updateCamera(deltaTime) {
     cameraLookTarget.copy(focal).add(new THREE.Vector3(0, 1.2, 0));
     camera.lookAt(cameraLookTarget);
     updateControlledLabelBillboard();
+    applyCameraShake(deltaTime);
     return;
   }
 
   if (cameraMode === 'PLAYER_CAM') {
-    const fx = Math.sin(controlledPlayer.rotation);
-    const fz = Math.cos(controlledPlayer.rotation);
+    const yaw = controlledPlayer.rotation + playerCamGamepadYaw;
+    const fx = Math.sin(yaw);
+    const fz = Math.cos(yaw);
     const back = 15;
-    const up = 8;
+    const up = 8 + playerCamGamepadPitch * 5;
     const cx = p.x - fx * back;
     const cz = p.z - fz * back;
     const cy = p.y + up;
@@ -3864,6 +4552,7 @@ function updateCamera(deltaTime) {
     cameraLookTarget.copy(p).add(new THREE.Vector3(0, 1.2, 0));
     camera.lookAt(cameraLookTarget);
     updateControlledLabelBillboard();
+    applyCameraShake(deltaTime);
   }
 }
 
@@ -4016,6 +4705,22 @@ function updateUI(deltaTime) {
   if (elScoreboard) {
     elScoreboard.textContent = `${TEAMS.home.name} ${homeScore} - ${awayScore} ${TEAMS.away.name}`;
   }
+  if (elMomentumFill) {
+    const pct = (momentumScore + 1) / 2;
+    const offset = (pct - 0.5) * 180;
+    elMomentumFill.style.transform = `translateX(${offset}px)`;
+  }
+  if (elMomHome) {
+    elMomHome.textContent = TEAMS.home.name.slice(0, 3).toUpperCase();
+  }
+  if (elMomAway) {
+    elMomAway.textContent = TEAMS.away.name.slice(0, 3).toUpperCase();
+  }
+  scoreboard3dTimer += deltaTime;
+  if (scoreboard3dTimer >= 1) {
+    scoreboard3dTimer = 0;
+    updateScoreboardTexture();
+  }
   uiTimerAccum += deltaTime;
   if (uiTimerAccum >= 0.25) {
     uiTimerAccum = 0;
@@ -4073,12 +4778,16 @@ function updateUI(deltaTime) {
     const pct = controlledPlayer.stamina / PLAYER_CONFIG.staminaMax;
     elStaminaFill.style.transform = `scaleX(${Math.max(0.05, pct)})`;
   }
+  if (elSubsHud) {
+    elSubsHud.textContent = `SUBS: ${MAX_SUBS - subsMade}`;
+  }
 
   const fatigueHud =
     gameState === GAME_STATE.PLAYING ||
     gameState === GAME_STATE.PAUSED ||
     gameState === GAME_STATE.FREEKICK ||
-    gameState === GAME_STATE.GOAL_REPLAY;
+    gameState === GAME_STATE.GOAL_REPLAY ||
+    gameState === GAME_STATE.SUBSTITUTION;
   if (elStaminaWrap) {
     const tired = fatigueHud && matchFatigueFactor < 0.88;
     elStaminaWrap.classList.toggle('fatigued', tired);
@@ -4369,6 +5078,16 @@ function setupUIListeners() {
     if (e.code === 'Space') e.preventDefault();
     if (e.code === 'Space') keySpacePressed = true;
     if (e.code === 'KeyQ') keyQPressed = true;
+    if (e.code === 'Tab') {
+      e.preventDefault();
+      if (gameState === GAME_STATE.PLAYING) {
+        if (subsMade >= MAX_SUBS) {
+          showCommentary('No substitutions remaining', 1);
+        } else {
+          setState(GAME_STATE.SUBSTITUTION);
+        }
+      }
+    }
     if (e.code === 'KeyC') {
       if (
         gameState === GAME_STATE.PLAYING ||
@@ -4387,8 +5106,16 @@ function setupUIListeners() {
     }
     if (e.code === 'Escape') {
       e.preventDefault();
-      if (gameState === GAME_STATE.PLAYING) setState(GAME_STATE.PAUSED);
-      else if (gameState === GAME_STATE.PAUSED) setState(GAME_STATE.PLAYING);
+      if (gameState === GAME_STATE.SUBSTITUTION) {
+        cancelSubstitution();
+      } else if (gameState === GAME_STATE.PLAYING) {
+        setState(GAME_STATE.PAUSED);
+      } else if (gameState === GAME_STATE.PAUSED) {
+        setState(GAME_STATE.PLAYING);
+      }
+    }
+    if (e.code === 'KeyF' && !e.repeat) {
+      toggleFullscreen();
     }
   });
   window.addEventListener('keyup', (e) => {
@@ -4416,6 +5143,10 @@ function setupUIListeners() {
   document.getElementById('btn-quick-match')?.addEventListener('click', () => {
     resetTeamsToDefault();
     activeFormation = '4-3-3';
+    weatherMode = 'clear';
+    document.querySelectorAll('.weather-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.weather === 'clear');
+    });
     startMatch();
   });
   document.getElementById('btn-custom-match')?.addEventListener('click', () => {
@@ -4435,8 +5166,75 @@ function setupUIListeners() {
   document.getElementById('btn-custom-back')?.addEventListener('click', () => {
     elMainMenu?.classList.remove('show-custom');
   });
+
+  document.querySelectorAll('.weather-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const w = btn.dataset.weather;
+      if (w !== 'clear' && w !== 'rain') return;
+      weatherMode = w;
+      document.querySelectorAll('.weather-btn').forEach((b) => {
+        b.classList.toggle('active', b.dataset.weather === weatherMode);
+      });
+    });
+  });
+
+  document.getElementById('sub-list')?.addEventListener('click', (e) => {
+    const row = e.target.closest('.sub-player-row');
+    if (!row || gameState !== GAME_STATE.SUBSTITUTION) return;
+    const slot = parseInt(row.dataset.slot, 10);
+    const pl = players.find(
+      (p) => p.teamIndex === GAME_CONFIG.userTeamIndex && p.slotIndex === slot
+    );
+    if (!pl || pl.role === 'gk') return;
+    if (subPanelPhase === 'off') {
+      subPlayerOut = pl;
+      subPanelPhase = 'on';
+      subPlayerIn = null;
+      renderSubPanelList();
+    } else if (subPanelPhase === 'on') {
+      subPlayerIn = pl;
+      renderSubPanelList();
+    }
+  });
+  document.getElementById('sub-confirm')?.addEventListener('click', () => {
+    if (
+      gameState === GAME_STATE.SUBSTITUTION &&
+      subPlayerOut &&
+      subPlayerIn &&
+      subPlayerOut !== subPlayerIn
+    ) {
+      performSubstitution(subPlayerOut, subPlayerIn);
+    }
+  });
+  document.getElementById('sub-cancel')?.addEventListener('click', () => {
+    if (gameState === GAME_STATE.SUBSTITUTION) cancelSubstitution();
+  });
+
   document.getElementById('btn-resume')?.addEventListener('click', () => setState(GAME_STATE.PLAYING));
   document.getElementById('btn-pause-main')?.addEventListener('click', () => setState(GAME_STATE.MENU));
+
+  document.getElementById('btn-fullscreen')?.addEventListener('click', () => {
+    toggleFullscreen();
+  });
+  document.addEventListener('fullscreenchange', () => {
+    const btn = document.getElementById('btn-fullscreen');
+    if (btn) {
+      btn.textContent = document.fullscreenElement
+        ? '✕ Exit Fullscreen'
+        : '⛶ Fullscreen';
+    }
+    onResize();
+  });
+
+  document.getElementById('btn-screenshot')?.addEventListener('click', () => {
+    if (!renderer || !scene || !camera) return;
+    renderer.render(scene, camera);
+    const link = document.createElement('a');
+    link.download = `goal-${Date.now()}.png`;
+    link.href = renderer.domElement.toDataURL('image/png');
+    link.click();
+    showCommentary('Screenshot saved!', 0);
+  });
   document.getElementById('btn-continue-half')?.addEventListener('click', () => {
     beginSecondHalf();
     setState(GAME_STATE.PLAYING);
@@ -4449,6 +5247,10 @@ function setupUIListeners() {
     document.documentElement.classList.add('has-touch');
   }
   setupMobileControls();
+
+  window.addEventListener('gamepadconnected', () => {
+    showCommentary('Controller connected.', 0);
+  });
 
   window.addEventListener('keydown', (e) => {
     if (gameState === GAME_STATE.HALFTIME && e.code === 'Space') {
@@ -4540,6 +5342,12 @@ function cacheDom() {
   elCommentaryText = document.getElementById('commentary-text');
   elStaminaWrap = document.getElementById('stamina-wrap');
   elStaminaLabel = document.getElementById('stamina-label');
+  elSubPanel = document.getElementById('sub-panel');
+  elSubsHud = document.getElementById('subs-hud');
+  elMomentumFill = document.getElementById('momentum-fill');
+  elMomHome = document.querySelector('#momentum-bar-wrap .mom-team.home-abbr');
+  elMomAway = document.querySelector('#momentum-bar-wrap .mom-team.away-abbr');
+  elHatTrickOverlay = document.getElementById('hat-trick-overlay');
 }
 
 function onResize() {
@@ -4587,9 +5395,163 @@ function runLoadingSequence(onDone) {
 // MAIN LOOP
 // =============================================================================
 
+function readGamepad(deltaTime) {
+  gamepadSprint = false;
+  gamepadShield = false;
+  gamepadYHeld = false;
+  gamepadFkUp = false;
+  gamepadFkDown = false;
+  gamepadFkLeft = false;
+  gamepadFkRight = false;
+  gamepadMoveDir.set(0, 0);
+
+  const gp = navigator.getGamepads?.()?.[0];
+  if (!gp || !gp.connected) {
+    playerCamGamepadYaw = 0;
+    playerCamGamepadPitch = 0;
+    for (let i = 0; i < gamepadPrev.length; i += 1) {
+      gamepadPrev[i] = false;
+    }
+    return;
+  }
+
+  const pressed = (i) => !!gp.buttons[i]?.pressed;
+
+  const ax = Math.abs(gp.axes[0] ?? 0) > 0.15 ? gp.axes[0] : 0;
+  const ay = Math.abs(gp.axes[1] ?? 0) > 0.15 ? gp.axes[1] : 0;
+  gamepadMoveDir.set(ax, ay);
+
+  const userFkTaker =
+    gameState === GAME_STATE.FREEKICK &&
+    freekickData.shooter &&
+    freekickData.shooter.teamIndex === GAME_CONFIG.userTeamIndex;
+
+  if (userFkTaker) {
+    gamepadFkUp = pressed(12);
+    gamepadFkDown = pressed(13);
+    gamepadFkLeft = pressed(14);
+    gamepadFkRight = pressed(15);
+  }
+
+  const canShootPlay =
+    gameState === GAME_STATE.PLAYING &&
+    controlledPlayer &&
+    controlledPlayer.hasBall &&
+    ballOwner === controlledPlayer;
+  const canFreekickShot =
+    gameState === GAME_STATE.FREEKICK && !!freekickData.shooter;
+
+  if (pressed(3) && (canShootPlay || canFreekickShot)) {
+    gamepadYHeld = true;
+  }
+
+  if (pressed(3) && !gamepadPrev[3]) {
+    if (canFreekickShot) {
+      shotCharging = true;
+      shotChargePct = 0;
+    } else if (canShootPlay) {
+      shotCharging = true;
+      shotChargePct = 0;
+    }
+  }
+
+  if (
+    gamepadPrev[3] &&
+    !pressed(3) &&
+    shotCharging &&
+    !keys.KeyE &&
+    !touchShootHeld
+  ) {
+    if (gameState === GAME_STATE.FREEKICK) {
+      executeFreekickShot(shotChargePct);
+    } else if (
+      gameState === GAME_STATE.PLAYING &&
+      controlledPlayer &&
+      controlledPlayer.hasBall &&
+      ballOwner === controlledPlayer
+    ) {
+      performShoot(controlledPlayer, shotChargePct);
+    }
+    shotCharging = false;
+    shotChargePct = 0;
+    if (elShotBar) elShotBar.style.transform = 'scaleX(0)';
+  }
+
+  if (pressed(0) && !gamepadPrev[0]) {
+    if (gameState === GAME_STATE.HALFTIME) {
+      beginSecondHalf();
+      setState(GAME_STATE.PLAYING);
+    } else if (
+      gameState === GAME_STATE.PENALTY &&
+      penaltyAwaitingKick &&
+      penaltyIntroTimer <= 0 &&
+      penaltyResolveTimer <= 0 &&
+      penaltyRunTimer <= 0 &&
+      penaltyTeam === GAME_CONFIG.userTeamIndex
+    ) {
+      keySpacePressed = true;
+    } else if (gameState === GAME_STATE.PLAYING) {
+      keySpacePressed = true;
+    }
+  }
+
+  if (pressed(1) && !gamepadPrev[1]) {
+    if (gameState === GAME_STATE.PLAYING && controlledPlayer) {
+      const has =
+        controlledPlayer.hasBall && ballOwner === controlledPlayer;
+      if (!has) {
+        keyEPressed = true;
+      }
+    }
+  }
+
+  if (pressed(2) && !gamepadPrev[2]) {
+    keyQPressed = true;
+  }
+
+  if (pressed(9) && !gamepadPrev[9]) {
+    if (gameState === GAME_STATE.PLAYING) {
+      setState(GAME_STATE.PAUSED);
+    } else if (gameState === GAME_STATE.PAUSED) {
+      setState(GAME_STATE.PLAYING);
+    }
+  }
+
+  gamepadSprint = pressed(4);
+  gamepadShield = pressed(5);
+
+  if (cameraMode === 'PLAYER_CAM') {
+    const rax =
+      Math.abs(gp.axes[2] ?? 0) > 0.15 ? gp.axes[2] : 0;
+    const ray =
+      Math.abs(gp.axes[3] ?? 0) > 0.15 ? gp.axes[3] : 0;
+    playerCamGamepadYaw += rax * 2.8 * deltaTime;
+    playerCamGamepadYaw = THREE.MathUtils.clamp(
+      playerCamGamepadYaw,
+      -1.55,
+      1.55
+    );
+    playerCamGamepadPitch += ray * 1.6 * deltaTime;
+    playerCamGamepadPitch = THREE.MathUtils.clamp(
+      playerCamGamepadPitch,
+      -0.65,
+      0.65
+    );
+  } else {
+    playerCamGamepadYaw = 0;
+    playerCamGamepadPitch = 0;
+  }
+
+  const n = Math.min(gamepadPrev.length, gp.buttons.length);
+  for (let i = 0; i < n; i += 1) {
+    gamepadPrev[i] = !!gp.buttons[i]?.pressed;
+  }
+}
+
 function animate() {
   requestAnimationFrame(animate);
   const deltaTime = Math.min(clock.getDelta(), 0.1);
+  readGamepad(deltaTime);
 
   if (gameState === GAME_STATE.PLAYING) {
     if (restartInProgress) {
@@ -4601,7 +5563,7 @@ function animate() {
     }
     updatePlayerMovement(deltaTime);
     updateBallPhysics(deltaTime);
-    checkBallControl();
+    checkBallControl(deltaTime);
     checkGoals();
     if (gameState === GAME_STATE.PLAYING) {
       checkNearMissShots(deltaTime);
@@ -4636,7 +5598,7 @@ function animate() {
     if (userFkTaker) {
       if (
         shotCharging &&
-        (keys.KeyE || touchShootHeld) &&
+        (keys.KeyE || touchShootHeld || gamepadYHeld) &&
         freekickData.shooter
       ) {
         shotChargePct = Math.min(
@@ -4644,16 +5606,16 @@ function animate() {
           shotChargePct + deltaTime / GAME_CONFIG.shotChargeDuration
         );
       }
-      if (keys.ArrowRight) {
+      if (keys.ArrowRight || gamepadFkRight) {
         freekickData.targetX = Math.min(6, freekickData.targetX + 0.5);
       }
-      if (keys.ArrowLeft) {
+      if (keys.ArrowLeft || gamepadFkLeft) {
         freekickData.targetX = Math.max(-6, freekickData.targetX - 0.5);
       }
-      if (keys.ArrowUp) {
+      if (keys.ArrowUp || gamepadFkUp) {
         freekickData.power = Math.min(1, freekickData.power + 0.35 * deltaTime);
       }
-      if (keys.ArrowDown) {
+      if (keys.ArrowDown || gamepadFkDown) {
         freekickData.power = Math.max(0.3, freekickData.power - 0.35 * deltaTime);
       }
       updateFreekickArrow();
@@ -4793,6 +5755,7 @@ function animate() {
       goalReplayPos.z + Math.cos(angle) * radius
     );
     camera.lookAt(goalReplayPos);
+    applyCameraShake(deltaTime);
     if (celebratingPlayer && celebrationTimer > 0) {
       celebrationTimer -= deltaTime * 0.4;
       const t = celebrationTimer;
@@ -4823,6 +5786,13 @@ function animate() {
     if (goalReplayTimer <= 0) {
       setState(GAME_STATE.PLAYING);
     }
+  } else if (gameState === GAME_STATE.SUBSTITUTION) {
+    updateCamera(deltaTime);
+    updateUI(deltaTime);
+  }
+
+  if (rainSystem && rainSystem.visible) {
+    updateRain(deltaTime);
   }
 
   if (homeNetDeform.active || awayNetDeform.active) {
@@ -4830,6 +5800,10 @@ function animate() {
   }
 
   updateBallTrail(deltaTime);
+
+  if (cornerFlagMeshes.length && clock) {
+    updateCornerFlags(clock.getElapsedTime());
+  }
 
   if (renderer && scene && camera) renderer.render(scene, camera);
 }
@@ -4840,6 +5814,7 @@ function animate() {
 
 async function initGame() {
   cacheDom();
+  updateHistoryPanel();
   initAudio();
   const canvas = document.getElementById('game-canvas');
   if (!canvas) return;
@@ -4864,6 +5839,7 @@ async function initGame() {
   createPitch();
   createCornerFlags();
   createStadiumEnvironment();
+  createScoreboard();
   createGoal(-1);
   createGoal(1);
   gameBall = createBall();
